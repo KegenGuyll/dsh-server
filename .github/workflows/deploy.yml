@@ -1,0 +1,26 @@
+name: Deploy
+
+# Build the dsh image, push it to GHCR, and notify the home-server deploy
+# agent via the personal-pipeline reusable workflow.
+#
+# The service name `dsh` must match services/dsh/ on the server.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  deploy:
+    uses: KegenGuyll/personal-pipeline/.github/workflows/deploy-service.yml@main
+    with:
+      service: dsh
+      # Home server arch unknown; build both and let the agent pull the match.
+      platforms: linux/amd64,linux/arm64
+    secrets:
+      deploy_webhook_url: ${{ secrets.DEPLOY_WEBHOOK_URL }}
+      deploy_webhook_secret: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
+      service_env: ${{ secrets.SERVICE_ENV }}
