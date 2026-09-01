@@ -139,9 +139,12 @@ function gitClone({ cloneUrl, dest, token, branch, shallow, timeoutMs = 120000 }
 	return new Promise((resolve, reject) => {
 		const child = execFile("git", args, { env, cwd: process.cwd(), maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
 			if (error) {
-				// git writes diagnostics to stderr; surface a concise tail.
-				const tail = String(stderr).trim().split("\n").slice(-6).join("\n") || String(stdout).trim().split("\n").slice(-6).join("\n");
-				reject(new Error(`git clone failed${tail ? `: ${tail}` : ""}`));
+				// ENOENT means git itself is missing (node:22-slim has no git).
+				// Otherwise git writes diagnostics to stderr; surface the tail.
+				const detail = error.code === "ENOENT"
+					? "git is not installed in this container"
+					: (String(stderr || "").trim() || String(stdout || "").trim() || String(error.message || error)).split("\n").slice(-10).join("\n");
+				reject(new Error(`git clone failed for ${cloneUrl} into ${dest}${detail ? ` — ${detail}` : ""}`));
 				return;
 			}
 			resolve(String(stdout));

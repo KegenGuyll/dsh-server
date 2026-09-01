@@ -33,7 +33,7 @@ window.__ModuleLoader__.load({
 			".dsh-github-cancel{color:#9a9aa2;}",
 			".dsh-github-modal-head{display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:8px;margin-bottom:6px;}",
 			".dsh-github-search{flex:1;min-width:0;padding:7px 9px;border:1px solid rgba(255,255,255,.14);border-radius:7px;background:#1c1c21;color:#e6e6e8;font:inherit;font-size:12px;}",
-			".dsh-github-list{flex:1;min-height:220px;max-height:300px;overflow:auto;display:flex;flex-direction:column;gap:2px;padding:4px;}",
+			".dsh-github-list{height:280px;overflow:auto;display:flex;flex-direction:column;gap:2px;padding:4px;}",
 			".dsh-github-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border-radius:7px;}",
 			".dsh-github-row-main{display:flex;flex-direction:column;gap:2px;min-width:0;}",
 			".dsh-github-row-title{font-weight:600;font-size:13px;color:#e6e6e8;}",
