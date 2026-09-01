@@ -11,6 +11,14 @@ set -e
 # a declared trusted host. Fail loud rather than boot an unusable server.
 : "${DSH_TRUSTED_HOST:?DSH_TRUSTED_HOST must be set to the MagicDNS hostname browsers will use (e.g. dsh.<tailnet>.ts.net) — the /api trust fence rejects everything without it}"
 
+# Auto-install the dsh-github plugin into the web profile (idempotent; skips
+# when already installed/current, refreshes on an image version change). It
+# registers the "Import from GitHub" workspace chooser and the GitHub settings
+# card. Ignore the install only when the image predates the plugin.
+if [ -e /opt/dsh-github/install.mjs ]; then
+  node /opt/dsh-github/install.mjs
+fi
+
 exec dsh web \
   --host 127.0.0.1 \
   --port 3080 \
