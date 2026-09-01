@@ -6,9 +6,10 @@
  * It deliberately registers NO model-facing tools and NO prompts: the GitHub
  * capability is UI-only, driven by the workspace "Add workspace" chooser.
  *
- * The client half addresses these methods through Package-private client→host
- * JSON RPC (`harness.handle` / `host.call`). Everything runs on the host so the
- * PAT never reaches the browser; each handler re-resolves the token per call.
+ * The client half addresses these methods through the generic Connection RPC
+ * channel (`ctx.connection.rpc`, authority `trusted-host`), which works over the
+ * tailnet. Everything runs on the host so the PAT never reaches the browser;
+ * each handler re-resolves the token per call.
  */
 
 import z from "@deepseek-ai/schemastery";
@@ -174,52 +175,73 @@ async function localCreate(path, name) {
 }
 
 /**
- * Register the client→host RPC handlers. `harness` is the harness Builtin the
- * browser-half invokes with `host.call`; it is read defensively so a
- * composition without it still boots (the browser UI then reports the calls as
- * unavailable rather than crashing the plugin).
+ * Register the client→host RPC handlers on the generic Connection RPC channel
+ * (`ctx.connection.rpc`), the durable transport that works over the tailnet
+ * with `authority: 'trusted-host'` (unlike the loopback-only settings RPCs that
+ * 403 on a remote browser). `harness.handle`/`host.call` is the dynamic-Cordis
+ * mechanism and is not available to a durable plugin, so it is not used here.
+ */
+/**
+ * Register the client→host handlers on the generic Connection RPC channel
+ * (`ctx.connection.rpc`), the durable transport that works over the tailnet
+ * with `authority: 'trusted-host'` (unlike the loopback-only settings RPCs that
+ * 403 on a remote browser). `harness.handle`/`host.call` is the dynamic-Cordis
+ * mechanism and is not available to a durable plugin, so it is not used here.
  */
 function registerHandlers(ctx, scope) {
-	const harness = ctx.get("harness");
-	if (!harness || typeof harness.handle !== "function") {
-		ctx.logger?.warn("github: harness handler unavailable — the GitHub browser UI cannot reach the host");
+	const conn = ctx.get("connection");
+	const rpc = conn?.rpc;
+	if (!rpc || typeof rpc.handle !== "function") {
+		ctx.logger?.warn("github: connection RPC unavailable — the browser UI cannot reach the host");
 		return;
 	}
 
-	harness.handle("github/list-user-repos", async (args) => {
-		const token = await resolveToken(ctx, scope);
-		if (!token) throw new Error("github: GitHub token is not configured (set it in Settings → Plugins → GitHub)");
-		return await listUserRepos(token, { page: args?.page ?? 1, perPage: args?.perPage ?? 50 });
-	});
-
-	harness.handle("github/status", async () => {
-		const token = await resolveToken(ctx, scope);
-		return { configured: !!token };
-	});
-
-	harness.handle("github/set-token", async (args) => {
-		if (!args?.value || typeof args.value !== "string" || args.value.trim().length === 0) {
-			throw new Error("github/set-token: a non-empty token value is required");
+	rpc.handle("/rpc", async (endpoint, payload) => {
+		try {
+			let value;
+			switch (endpoint) {
+				case "github/list-user-repos": {
+					const token = await resolveToken(ctx, scope);
+					if (!token) throw new Error("github: GitHub token is not configured (set the GITHUB_TOKEN env var)");
+					value = await listUserRepos(token, { page: payload?.page ?? 1, perPage: payload?.perPage ?? 50 });
+					break;
+				}
+				case "github/status": {
+					value = { configured: !!(await resolveToken(ctx, scope)) };
+					break;
+				}
+				case "github/set-token": {
+					if (!payload?.value || String(payload.value).trim().length === 0) throw new Error("github/set-token: a non-empty token value is required");
+					await ctx.credentials.set(resolveRefName(scope), String(payload.value).trim());
+					value = { configured: true };
+					break;
+				}
+				case "github/clear-token": {
+					await ctx.credentials.unset(resolveRefName(scope));
+					value = { configured: false };
+					break;
+				}
+				case "github/import": {
+					if (!payload?.repo) throw new Error("github/import: `repo` (owner/name) is required");
+					value = await createWorkspaceFromRepo(ctx, scope, payload);
+					break;
+				}
+				case "github/local-list": {
+					value = await localList(payload?.path);
+					break;
+				}
+				case "github/local-create": {
+					value = await localCreate(payload?.path, payload?.name);
+					break;
+				}
+				default:
+					throw new Error(`github: unknown endpoint '${endpoint}'`);
+			}
+			return { ok: true, value };
+		} catch (error) {
+			return { ok: false, error: { code: "internal", message: String(error?.message ?? error), details: {} } };
 		}
-		const ref = resolveRefName(scope);
-		await ctx.credentials.set(ref, args.value.trim());
-		return { configured: true };
-	});
-
-	harness.handle("github/clear-token", async () => {
-		const ref = resolveRefName(scope);
-		await ctx.credentials.unset(ref);
-		return { configured: false };
-	});
-
-	harness.handle("github/import", async (args) => {
-		if (!args?.repo) throw new Error("github/import: `repo` (owner/name) is required");
-		return await createWorkspaceFromRepo(ctx, scope, args);
-	});
-
-	// Self-contained local directory pick (Option B): navigation + folder create.
-	harness.handle("github/local-list", async (args) => await localList(args?.path));
-	harness.handle("github/local-create", async (args) => await localCreate(args?.path, args?.name));
+	}, { authority: "trusted-host" });
 }
 
 /**

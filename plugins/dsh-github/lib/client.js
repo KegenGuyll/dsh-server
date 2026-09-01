@@ -5,8 +5,9 @@
  * import modal, and registers a Settings → Plugins card for the token.
  *
  * All GitHub work runs on the host (the PAT never crosses the wire): the client
- * calls the host through Package-private client→host JSON RPC
- * (`host.call(method, args)`), with the host handlers declared in index.js.
+ * calls the host through the generic Connection RPC channel
+ * (`ctx.connection.rpc.call('/rpc', method, args)`), with the host handlers
+ * declared in index.js.
  */
 window.__ModuleLoader__.load({
 	id: "dsh-github",
@@ -21,11 +22,10 @@ window.__ModuleLoader__.load({
 		 * Sized and colored with the harness theme tokens (--dsw-alias-*) so the
 		 * surfaces match the in-app "View options" menu and dialogs. */
 		var STYLES = [
-			".dsh-github-chooser,.dsh-github-modal,.dsh-github-local,.dsh-github-card{",
-			"background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#111);",
-			"border:1px solid var(--dsw-alias-border-l,rgba(0,0,0,.1));border-radius:10px;",
-			"box-shadow:0 8px 28px rgba(0,0,0,.16);min-width:224px;padding:6px;display:flex;flex-direction:column;gap:2px;font:inherit;",
-			"}",
+			".dsh-github-overlay{position:fixed;inset:0;z-index:10000;background:rgba(12,12,16,.44);display:flex;align-items:center;justify-content:center;padding:16px;}",
+			".dsh-github-dialog{background:var(--dsw-alias-bg-overlay,#1c1c22);color:var(--dsw-alias-label-primary,#eee);border:1px solid var(--dsw-alias-border-l,rgba(0,0,0,.2));border-radius:12px;box-shadow:0 16px 44px rgba(0,0,0,.34);min-width:300px;max-width:min(560px,92vw);max-height:80vh;display:flex;flex-direction:column;overflow:hidden;}",
+			".dsh-github-card{background:var(--dsw-alias-bg-overlay,#1c1c22);color:var(--dsw-alias-label-primary,#eee);border:1px solid var(--dsw-alias-border-l,rgba(0,0,0,.2));border-radius:10px;min-width:224px;padding:6px;display:flex;flex-direction:column;gap:2px;font:inherit;}",
+			".dsh-github-chooser,.dsh-github-modal,.dsh-github-local{display:flex;flex-direction:column;gap:2px;padding:6px;}",
 			".dsh-github-chooser-title,.dsh-github-modal-head,.dsh-github-card-status{",
 			"font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;",
 			"color:var(--dsw-alias-label-secondary,#555);padding:6px 10px 4px;",
@@ -74,13 +74,17 @@ window.__ModuleLoader__.load({
 		/** Required client services (Cordis fibre inject). */
 		const inject = ["slots"];
 
-		/** Bound client→host caller, resolved defensively from the context. */
+		/** Bound client→host caller over the generic Connection RPC channel. */
 		function hostCall(ctx, method, args) {
-			const host = ctx.get("host");
-			if (!host || typeof host.call !== "function") {
-				throw new Error("GitHub host channel is unavailable");
+			const rpc = ctx.get("connection")?.rpc;
+			if (!rpc || typeof rpc.call !== "function") {
+				return Promise.reject(new Error("GitHub host channel is unavailable"));
 			}
-			return host.call(method, args);
+			return rpc.call("/rpc", method, args).then((result) => {
+				if (result && result.ok) return result.value;
+				const message = (result && result.error && result.error.message) || "GitHub request failed";
+				throw new Error(message);
+			});
 		}
 
 		class RepoImportError extends Error {
@@ -240,30 +244,38 @@ window.__ModuleLoader__.load({
 
 			if (!open) return null;
 
+			let content;
 			if (view === "github") {
-				return React.createElement(GithubImportModal, {
+				content = React.createElement(GithubImportModal, {
 					listRepos, importRepo,
 					onPicked: (path) => onPicked(path),
 					onError: (msg) => onError(msg),
 					onBack: () => setView("menu"),
 					onCancel: () => onCancel()
 				});
-			}
-
-			if (view === "local") {
-				return React.createElement(LocalDirDialog, {
+			} else if (view === "local") {
+				content = React.createElement(LocalDirDialog, {
 					localList, localCreate,
 					onPicked: (path) => onPicked(path),
 					onError: (msg) => onError(msg),
 					onCancel: () => onCancel()
 				});
+			} else {
+				content = React.createElement("div", { className: "dsh-github-chooser" },
+					React.createElement("div", { className: "dsh-github-chooser-title" }, "Add workspace"),
+					React.createElement("button", { className: "dsh-github-choice", disabled: busy, onClick: () => setView("local") }, "Add local workspace"),
+					React.createElement("button", { className: "dsh-github-choice", disabled: busy, onClick: () => setView("github") }, "Import from GitHub"),
+					React.createElement("button", { className: "dsh-github-choice dsh-github-cancel", onClick: onCancel }, "Cancel"));
 			}
 
-			return React.createElement("div", { className: "dsh-github-chooser" },
-				React.createElement("div", { className: "dsh-github-chooser-title" }, "Add workspace"),
-				React.createElement("button", { className: "dsh-github-choice", disabled: busy, onClick: () => setView("local") }, "Add local workspace"),
-				React.createElement("button", { className: "dsh-github-choice", disabled: busy, onClick: () => setView("github") }, "Import from GitHub"),
-				React.createElement("button", { className: "dsh-github-choice dsh-github-cancel", onClick: onCancel }, "Cancel"));
+			// Render as a modal overlay (a new stacking/event context) rather than
+			// inline in the owner's popover row. The fixed backdrop isolates our
+			// clicks from the owner's close/outside-click handler and centers the
+			// dialog like the in-app browse dialog.
+			return React.createElement("div", {
+				className: "dsh-github-overlay",
+				onMouseDown: (e) => { if (e.target === e.currentTarget) onCancel(); }
+			}, React.createElement("div", { className: "dsh-github-dialog" }, content));
 		}
 
 		/**
