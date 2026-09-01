@@ -22,41 +22,61 @@ window.__ModuleLoader__.load({
 		 * Sized and colored with the harness theme tokens (--dsw-alias-*) so the
 		 * surfaces match the in-app "View options" menu and dialogs. */
 		var STYLES = [
+			// Palette, keyed by the detected theme on the overlay (.dsh-github-overlay).
+			// The light/dark override is applied via the data-dsh-theme attribute the
+			// chooser sets, matching the harness theme selection instead of hardcoding.
+			".dsh-github-overlay[data-dsh-theme=light]{--dgh-bg:#ffffff;--dgh-text:#1b1b1f;--dgh-dim:#6b6b73;--dgh-border:rgba(0,0,0,.12);--dgh-hover:rgba(0,0,0,.06);--dgh-accent:#2563eb;--dgh-field:#f4f4f6;--dgh-err:#dc2626;}",
+			".dsh-github-overlay[data-dsh-theme=dark]{--dgh-bg:#242429;--dgh-text:#e6e6e8;--dgh-dim:#8f8f98;--dgh-border:rgba(255,255,255,.09);--dgh-hover:rgba(255,255,255,.07);--dgh-accent:#3b82f6;--dgh-field:#1c1c21;--dgh-err:#ff6b6b;}",
 			".dsh-github-overlay{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;}",
-			".dsh-github-dialog{background:#242429;color:#e6e6e8;border:1px solid rgba(255,255,255,.09);border-radius:12px;box-shadow:0 16px 44px rgba(0,0,0,.45);min-width:340px;max-width:min(560px,92vw);min-height:240px;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;}",
+			".dsh-github-dialog{background:var(--dgh-bg,#242429);color:var(--dgh-text,#e6e6e8);border:1px solid var(--dgh-border,rgba(255,255,255,.09));border-radius:12px;box-shadow:0 16px 44px rgba(0,0,0,.45);min-width:340px;max-width:min(560px,92vw);min-height:240px;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;}",
 			".dsh-github-card{background:#242429;color:#e6e6e8;border:1px solid rgba(255,255,255,.09);border-radius:10px;min-width:224px;padding:6px;display:flex;flex-direction:column;gap:2px;font:inherit;}",
 			".dsh-github-chooser,.dsh-github-modal,.dsh-github-local{display:flex;flex-direction:column;gap:2px;padding:6px;min-height:0;flex:1;}",
-			".dsh-github-chooser-title,.dsh-github-modal-head,.dsh-github-card-status{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#8f8f98;padding:8px 10px 6px;}",
-			".dsh-github-choice,.dsh-github-dir{display:flex;align-items:center;gap:8px;width:100%;padding:10px 12px;border:0;border-radius:7px;background:transparent;color:#e6e6e8;cursor:pointer;text-align:left;font:inherit;font-size:13px;}",
-			".dsh-github-choice:hover,.dsh-github-dir:hover,.dsh-github-row:hover{background:rgba(255,255,255,.07);}",
+			".dsh-github-chooser-title,.dsh-github-modal-head,.dsh-github-card-status{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--dgh-dim,#8f8f98);padding:8px 10px 6px;}",
+			".dsh-github-choice,.dsh-github-dir{display:flex;align-items:center;gap:8px;width:100%;padding:10px 12px;border:0;border-radius:7px;background:transparent;color:var(--dgh-text,#e6e6e8);cursor:pointer;text-align:left;font:inherit;font-size:13px;}",
+			".dsh-github-choice:hover,.dsh-github-dir:hover,.dsh-github-row:hover{background:var(--dgh-hover,rgba(255,255,255,.07));}",
 			".dsh-github-choice:disabled,.dsh-github-dir:disabled{opacity:.5;cursor:default;}",
-			".dsh-github-cancel{color:#9a9aa2;}",
-			".dsh-github-modal-head{display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:8px;margin-bottom:6px;}",
-			".dsh-github-search{flex:1;min-width:0;padding:7px 9px;border:1px solid rgba(255,255,255,.14);border-radius:7px;background:#1c1c21;color:#e6e6e8;font:inherit;font-size:12px;}",
+			".dsh-github-cancel{color:var(--dgh-dim,#9a9aa2);}",
+			".dsh-github-modal-head{display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid var(--dgh-border,rgba(255,255,255,.08));padding-bottom:8px;margin-bottom:6px;}",
+			".dsh-github-search{flex:1;min-width:0;padding:7px 9px;border:1px solid var(--dgh-border,rgba(255,255,255,.14));border-radius:7px;background:var(--dgh-field,#1c1c21);color:var(--dgh-text,#e6e6e8);font:inherit;font-size:12px;}",
 			".dsh-github-list{height:280px;overflow:auto;display:flex;flex-direction:column;gap:2px;padding:4px;}",
 			".dsh-github-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border-radius:7px;}",
 			".dsh-github-row-main{display:flex;flex-direction:column;gap:2px;min-width:0;}",
-			".dsh-github-row-title{font-weight:600;font-size:13px;color:#e6e6e8;}",
-			".dsh-github-row-desc{color:#8f8f98;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}",
-			".dsh-github-row-meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:11px;color:#8f8f98;}",
-			".dsh-github-badge{background:rgba(255,255,255,.08);padding:1px 6px;border-radius:999px;color:#b8b8be;}",
-			".dsh-github-private{color:#8f8f98;}",
-			".dsh-github-empty,.dsh-github-loading,.dsh-github-error{color:#9a9aa2;font-size:12px;padding:12px;text-align:center;}",
-			".dsh-github-error{color:#ff6b6b;}",
-			".dsh-github-import,.dsh-github-save{background:#3b82f6;color:#fff;border:0;border-radius:7px;padding:7px 12px;font:inherit;font-size:12px;cursor:pointer;}",
+			".dsh-github-row-title{font-weight:600;font-size:13px;color:var(--dgh-text,#e6e6e8);}",
+			".dsh-github-row-desc{color:var(--dgh-dim,#8f8f98);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}",
+			".dsh-github-row-meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--dgh-dim,#8f8f98);}",
+			".dsh-github-badge{background:var(--dgh-hover,rgba(255,255,255,.08));padding:1px 6px;border-radius:999px;color:var(--dgh-dim,#b8b8be);}",
+			".dsh-github-private{color:var(--dgh-dim,#8f8f98);}",
+			".dsh-github-empty,.dsh-github-loading,.dsh-github-error{color:var(--dgh-dim,#9a9aa2);font-size:12px;padding:12px;text-align:center;}",
+			".dsh-github-error{color:var(--dgh-err,#ff6b6b);}",
+			".dsh-github-import,.dsh-github-save{background:var(--dgh-accent,#3b82f6);color:#fff;border:0;border-radius:7px;padding:7px 12px;font:inherit;font-size:12px;cursor:pointer;}",
 			".dsh-github-import:disabled,.dsh-github-save:disabled{opacity:.6;cursor:default;}",
-			".dsh-github-load-more,.dsh-github-back,.dsh-github-close,.dsh-github-mkdir,.dsh-github-up,.dsh-github-clear,.dsh-github-cancel{background:transparent;border:1px solid rgba(255,255,255,.14);border-radius:7px;padding:7px 12px;color:#e6e6e8;font:inherit;font-size:12px;cursor:pointer;}",
+			".dsh-github-load-more,.dsh-github-back,.dsh-github-close,.dsh-github-mkdir,.dsh-github-up,.dsh-github-clear,.dsh-github-cancel{background:transparent;border:1px solid var(--dgh-border,rgba(255,255,255,.14));border-radius:7px;padding:7px 12px;color:var(--dgh-text,#e6e6e8);font:inherit;font-size:12px;cursor:pointer;}",
 			".dsh-github-load-more{display:block;margin:6px auto;}",
 			".dsh-github-modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:8px 6px 4px;}",
 			".dsh-github-local-controls{display:flex;gap:8px;padding:8px 10px;align-items:center;}",
-			".dsh-github-new-name{flex:1;padding:7px 9px;border:1px solid rgba(255,255,255,.14);border-radius:7px;background:#1c1c21;color:#e6e6e8;font:inherit;font-size:12px;}",
-			".dsh-github-path{font-size:11px;font-weight:400;color:#8f8f98;}",
-			".dsh-github-field{display:flex;flex-direction:column;gap:4px;padding:6px 10px;font-size:12px;color:#8f8f98;}",
-			".dsh-github-field input[type=text],.dsh-github-field input[type=password],.dsh-github-field input:not([type=checkbox]){padding:6px 8px;border:1px solid rgba(255,255,255,.14);border-radius:7px;background:#1c1c21;color:#e6e6e8;font:inherit;}",
+			".dsh-github-new-name{flex:1;padding:7px 9px;border:1px solid var(--dgh-border,rgba(255,255,255,.14));border-radius:7px;background:var(--dgh-field,#1c1c21);color:var(--dgh-text,#e6e6e8);font:inherit;font-size:12px;}",
+			".dsh-github-path{font-size:11px;font-weight:400;color:var(--dgh-dim,#8f8f98);}",
+			".dsh-github-field{display:flex;flex-direction:column;gap:4px;padding:6px 10px;font-size:12px;color:var(--dgh-dim,#8f8f98);}",
+			".dsh-github-field input[type=text],.dsh-github-field input[type=password],.dsh-github-field input:not([type=checkbox]){padding:6px 8px;border:1px solid var(--dgh-border,rgba(255,255,255,.14));border-radius:7px;background:var(--dgh-field,#1c1c21);color:var(--dgh-text,#e6e6e8);font:inherit;}",
 			".dsh-github-card-status{display:flex;align-items:center;gap:6px;font-weight:600;color:#e6e6e8;}",
 			".dsh-github-card-detail{font-weight:400;text-transform:none;}",
 			".dsh-github-card-actions{display:flex;gap:8px;padding:8px 10px 4px;}"
 		].join("\n");
+
+		/** Detect the harness theme (data-theme attr / .dark class / prefers-color-scheme). */
+		function resolveDark() {
+			try {
+				var el = document.documentElement;
+				if (el) {
+					var t = el.getAttribute("data-theme");
+					if (t === "dark") return true;
+					if (t === "light") return false;
+					if (el.classList.contains("dark")) return true;
+				}
+			} catch (e) {}
+			try { if (typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches) return true; } catch (e) {}
+			return false;
+		}
 		function injectStyles() {
 			if (typeof document === "undefined" || document.getElementById("dsh-github-style")) return;
 			var el = document.createElement("style");
@@ -273,6 +293,7 @@ window.__ModuleLoader__.load({
 			// dialog like the in-app browse dialog.
 			return React.createElement("div", {
 				className: "dsh-github-overlay",
+				"data-dsh-theme": resolveDark() ? "dark" : "light",
 				onMouseDown: (e) => { if (e.target === e.currentTarget) onCancel(); }
 			}, React.createElement("div", { className: "dsh-github-dialog" }, content));
 		}
