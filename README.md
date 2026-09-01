@@ -41,13 +41,15 @@ the value never leaves the host), set the clone root, and see connection status.
 The `GITHUB_TOKEN` env var (or the Settings card) supplies the token; the
 card's token write is the usual way, so `.env` usually stays unset.
 
-The plugin is **auto-installed** from the image by `entrypoint.sh` on first boot:
-`install.mjs` initializes the `web` profile if needed, installs the package via
-`dsh plugin --profile web add /opt/dsh-github`, and idempotently adds the
-`github` loader row (and disables the directory-picker row) to
-`profiles/web/cordis.patch.yml`. Installation is guarded by a version marker in
-the profile, so a rebuilt image with a newer plugin version refreshes it while
-the persistent `/data` volume survives.
+The plugin is a **bundle** (`dsh.bundle.patch`), so `dsh plugin --profile web add`
+installs it **and** appends it to `dsh.profile.bundles`; its `cordis.patch.yml`
+then registers the `github` row and disables the directory-picker row. The
+auto-installer `entrypoint.sh` runs is idempotent and version-marker-gated — it
+repairs a profile `cordis.patch.yml` left invalid by an earlier bug, then
+installs the plugin via the `dsh` CLI. Installation is guarded by a version
+marker in the profile, so a rebuilt image with a newer plugin version refreshes
+it while the persistent `/data` volume survives; it does not hand-edit the
+profile's `cordis.patch.yml`.
 
 ### Local picking
 

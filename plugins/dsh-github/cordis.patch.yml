@@ -1,0 +1,16 @@
+# dsh-github bundle patch, applied automatically when this package is listed in
+# dsh.profile.bundles (the dsh CLI adds it there on `dsh plugin add` because this
+# package declares dsh.bundle.patch).
+#
+#   - Insert the host/service row for the plugin itself. The loader resolves
+#     `dsh-github` from the profile's node_modules.
+#   - Disable the harness `directory-picker` row: this plugin's chooser owns the
+#     two single-kind directory-flow holes, so the directory-picker's own client
+#     flow must not also occupy them (a second single-kind occupant fails at load).
+
+- insert:
+    - id: github
+      name: 'dsh-github'
+
+- id: directory-picker
+  disabled: true
