@@ -1,2 +1,7 @@
 .DS_Store
 *.swp
+
+# Real env files are secrets; only .env.example is tracked.
+.env
+.env.*
+!.env.example

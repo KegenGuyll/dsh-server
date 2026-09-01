@@ -24,18 +24,18 @@ entrypoint.sh                  dsh web --host 127.0.0.1 --port 3080 --no-open --
 
 ## Runtime contract
 
-The deploy agent writes these into `services/dsh/.env` on the server (from the
-repo's `SERVICE_ENV` secret, plus `TAG`):
+The deploy agent writes these into `services/dsh-server/.env` on the server
+(from the repo's `SERVICE_ENV` secret, plus `TAG`). See
+[`.env.example`](.env.example) for a complete, commented template:
 
 | Variable          | Meaning                                                        |
 |-------------------|----------------------------------------------------------------|
 | `TAG`             | Image tag (`sha-<commit>`), written by the deploy agent        |
-| `TS_AUTHKEY`      | Tailscale auth key for the sidecar                             |
 | `TS_HOSTNAME`     | Optional; MagicDNS hostname (default `dsh`)                    |
 | `DEEPSEEK_API_KEY`| DeepSeek API key (or configure in the web UI Models page)      |
 | `DSH_TRUSTED_HOST`| Must equal the hostname browsers use, e.g. `dsh.<tailnet>.ts.net` |
 
-Volumes (declared in `services/dsh/docker-compose.yml`):
+Volumes (declared in `services/dsh-server/docker-compose.yml`):
 
 - `dsh-data` → `/data` = `$DSH_HOME`: sessions (JSONL), `settings.yaml`,
   `.credentials.yaml`, the auto-initialized web profile, `storages/`
