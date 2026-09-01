@@ -1,0 +1,16 @@
+name: Deploy
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  packages: write
+jobs:
+  deploy:
+    uses: kegenguyll/personal-pipeline/.github/workflows/deploy-service.yml@main
+    with:
+      service: dsh-server
+    secrets:
+      deploy_webhook_url: ${{ secrets.DEPLOY_WEBHOOK_URL }}
+      deploy_webhook_secret: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
+      service_env: ${{ secrets.SERVICE_ENV }}
