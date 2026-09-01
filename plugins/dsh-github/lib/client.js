@@ -17,6 +17,60 @@ window.__ModuleLoader__.load({
 
 		var React = require("react");
 
+		/* Styles for the workspace-add chooser / import modal / settings card.
+		 * Sized and colored with the harness theme tokens (--dsw-alias-*) so the
+		 * surfaces match the in-app "View options" menu and dialogs. */
+		var STYLES = [
+			".dsh-github-chooser,.dsh-github-modal,.dsh-github-local,.dsh-github-card{",
+			"background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#111);",
+			"border:1px solid var(--dsw-alias-border-l,rgba(0,0,0,.1));border-radius:10px;",
+			"box-shadow:0 8px 28px rgba(0,0,0,.16);min-width:224px;padding:6px;display:flex;flex-direction:column;gap:2px;font:inherit;",
+			"}",
+			".dsh-github-chooser-title,.dsh-github-modal-head,.dsh-github-card-status{",
+			"font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;",
+			"color:var(--dsw-alias-label-secondary,#555);padding:6px 10px 4px;",
+			"}",
+			".dsh-github-choice,.dsh-github-dir,.dsh-github-importerow{",
+			"display:flex;align-items:center;gap:8px;width:100%;padding:9px 10px;border:0;border-radius:7px;",
+			"background:transparent;color:var(--dsw-alias-label-primary,#111);cursor:pointer;text-align:left;font:inherit;font-size:13px;",
+			"}",
+			".dsh-github-choice:hover,.dsh-github-dir:hover,.dsh-github-row:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));}",
+			".dsh-github-choice:disabled,.dsh-github-dir:disabled{opacity:.5;cursor:default;}",
+			".dsh-github-cancel{color:var(--dsw-alias-label-secondary,#555);}",
+			".dsh-github-modal-head{display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid var(--dsw-alias-border-l,rgba(0,0,0,.08));}",
+			".dsh-github-search{flex:1;min-width:0;padding:6px 8px;border:1px solid var(--dsw-alias-border-l,rgba(0,0,0,.15));border-radius:7px;background:var(--dsw-alias-bg-base,transparent);color:inherit;font:inherit;font-size:12px;}",
+			".dsh-github-list{max-height:300px;overflow:auto;display:flex;flex-direction:column;gap:2px;padding:2px;}",
+			".dsh-github-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border-radius:7px;}",
+			".dsh-github-row-main{display:flex;flex-direction:column;gap:2px;min-width:0;}",
+			".dsh-github-row-title{font-weight:600;font-size:13px;}",
+			".dsh-github-row-desc{color:var(--dsw-alias-label-secondary,#555);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}",
+			".dsh-github-row-meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--dsw-alias-label-tertiary,#777);}",
+			".dsh-github-badge{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));padding:1px 6px;border-radius:999px;}",
+			".dsh-github-private{color:var(--dsw-alias-label-primary-dimmed,#888);}",
+			".dsh-github-empty,.dsh-github-error{color:var(--dsw-alias-label-secondary,#555);font-size:12px;padding:10px;}",
+			".dsh-github-error{color:#c0392b;}",
+			".dsh-github-import,.dsh-github-save{background:var(--dsw-alias-button-primary-fill,#2563eb);color:var(--dsw-alias-label-primary-inverted,#fff);border:0;border-radius:7px;padding:7px 12px;font:inherit;font-size:12px;cursor:pointer;}",
+			".dsh-github-import:disabled,.dsh-github-save:disabled{opacity:.6;cursor:default;}",
+			".dsh-github-load-more,.dsh-github-back,.dsh-github-close,.dsh-github-mkdir,.dsh-github-up,.dsh-github-clear,.dsh-github-cancel{background:transparent;border:1px solid var(--dsw-alias-border-l,rgba(0,0,0,.15));border-radius:7px;padding:7px 12px;color:var(--dsw-alias-label-primary,#111);font:inherit;font-size:12px;cursor:pointer;}",
+			".dsh-github-modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:8px 6px 2px;}",
+			".dsh-github-local-controls{display:flex;gap:8px;padding:8px 10px;align-items:center;}",
+			".dsh-github-new-name{flex:1;padding:6px 8px;border:1px solid var(--dsw-alias-border-l,rgba(0,0,0,.15));border-radius:7px;background:var(--dsw-alias-bg-base,transparent);color:inherit;font:inherit;font-size:12px;}",
+			".dsh-github-path{font-size:11px;font-weight:400;color:var(--dsw-alias-label-tertiary,#777);}",
+			".dsh-github-field{display:flex;flex-direction:column;gap:4px;padding:6px 10px;font-size:12px;color:var(--dsw-alias-label-secondary,#555);}",
+			".dsh-github-field input[type=text],.dsh-github-field input[type=password],.dsh-github-field input:not([type=checkbox]){padding:6px 8px;border:1px solid var(--dsw-alias-border-l,rgba(0,0,0,.15));border-radius:7px;background:var(--dsw-alias-bg-base,transparent);color:inherit;font:inherit;}",
+			".dsh-github-card-status{display:flex;align-items:center;gap:6px;font-weight:600;}",
+			".dsh-github-card-detail{font-weight:400;text-transform:none;}",
+			".dsh-github-card-actions{display:flex;gap:8px;padding:8px 10px 4px;}"
+		].join("\n");
+		function injectStyles() {
+			if (typeof document === "undefined" || document.getElementById("dsh-github-style")) return;
+			var el = document.createElement("style");
+			el.id = "dsh-github-style";
+			el.textContent = STYLES;
+			document.head.appendChild(el);
+		}
+		injectStyles();
+
 		/** Required client services (Cordis fibre inject). */
 		const inject = ["slots"];
 
