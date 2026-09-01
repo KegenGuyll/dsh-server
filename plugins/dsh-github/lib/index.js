@@ -12,10 +12,23 @@
  */
 
 import z from "@deepseek-ai/schemastery";
-import { credentialRef } from "@deepseek-ai/dsh-credentials";
 import { join, dirname, isAbsolute } from "node:path";
 import { readdir, mkdir } from "node:fs/promises";
 import { listUserRepos, getRepo, gitClone, slug } from "./github.js";
+
+/**
+ * Brand a raw string as a credential reference name (a POSIX shell identifier).
+ * Inlined to avoid importing @deepseek-ai/dsh-credentials, whose own entry
+ * imports @deepseek-ai/cordis (a harness peer not resolvable from this
+ * out-of-tree plugin's real path). The seam treats the branded string as a
+ * plain identifier at runtime; this validates the same grammar it would.
+ */
+function credentialRef(value) {
+	if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+		throw new TypeError(`credential ref "${value}" must match a POSIX shell identifier`);
+	}
+	return value;
+}
 
 /** Resolve the configured reference name (for the token write/clear handlers). */
 function resolveRefName(scope) {

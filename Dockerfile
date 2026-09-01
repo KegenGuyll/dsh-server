@@ -14,8 +14,14 @@ RUN npm install -g @deepseek-ai/dsh@0.1.1-rc.2 \
 
 # The out-of-tree dsh-github plugin (host + client bundle + idempotent installer)
 # is baked into the image; entrypoint.sh auto-installs it into the web profile
-# on first boot.
+# on first boot. The plugin is resolved at its real path (/opt/dsh-github), so its
+# own runtime imports (@deepseek-ai/schemastery, @deepseek-ai/dsh-credentials) are
+# installed here rather than resolved from the profile. Peers are not
+# auto-installed (the harness provides them), matching pnpm's autoInstallPeers:false.
 COPY --chown=node:node plugins/dsh-github /opt/dsh-github
+RUN cd /opt/dsh-github \
+  && npm install --omit=dev --no-audit --no-fund --ignore-scripts --legacy-peer-deps \
+  && rm -rf node_modules/.cache
 
 # /data     = $DSH_HOME (sessions, settings.yaml, credentials, web profile)
 # /workspaces = the agent's cwd (project checkouts)
