@@ -22,43 +22,38 @@ window.__ModuleLoader__.load({
 		 * Sized and colored with the harness theme tokens (--dsw-alias-*) so the
 		 * surfaces match the in-app "View options" menu and dialogs. */
 		var STYLES = [
-			".dsh-github-overlay{position:fixed;inset:0;z-index:10000;background:rgba(12,12,16,.44);display:flex;align-items:center;justify-content:center;padding:16px;}",
-			".dsh-github-dialog{background:var(--dsw-alias-bg-overlay,#1c1c22);color:var(--dsw-alias-label-primary,#eee);border:1px solid var(--dsw-alias-border-l,rgba(0,0,0,.2));border-radius:12px;box-shadow:0 16px 44px rgba(0,0,0,.34);min-width:300px;max-width:min(560px,92vw);max-height:80vh;display:flex;flex-direction:column;overflow:hidden;}",
-			".dsh-github-card{background:var(--dsw-alias-bg-overlay,#1c1c22);color:var(--dsw-alias-label-primary,#eee);border:1px solid var(--dsw-alias-border-l,rgba(0,0,0,.2));border-radius:10px;min-width:224px;padding:6px;display:flex;flex-direction:column;gap:2px;font:inherit;}",
-			".dsh-github-chooser,.dsh-github-modal,.dsh-github-local{display:flex;flex-direction:column;gap:2px;padding:6px;}",
-			".dsh-github-chooser-title,.dsh-github-modal-head,.dsh-github-card-status{",
-			"font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;",
-			"color:var(--dsw-alias-label-secondary,#555);padding:6px 10px 4px;",
-			"}",
-			".dsh-github-choice,.dsh-github-dir,.dsh-github-importerow{",
-			"display:flex;align-items:center;gap:8px;width:100%;padding:9px 10px;border:0;border-radius:7px;",
-			"background:transparent;color:var(--dsw-alias-label-primary,#111);cursor:pointer;text-align:left;font:inherit;font-size:13px;",
-			"}",
-			".dsh-github-choice:hover,.dsh-github-dir:hover,.dsh-github-row:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));}",
+			".dsh-github-overlay{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;}",
+			".dsh-github-dialog{background:#242429;color:#e6e6e8;border:1px solid rgba(255,255,255,.09);border-radius:12px;box-shadow:0 16px 44px rgba(0,0,0,.45);min-width:340px;max-width:min(560px,92vw);min-height:240px;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;}",
+			".dsh-github-card{background:#242429;color:#e6e6e8;border:1px solid rgba(255,255,255,.09);border-radius:10px;min-width:224px;padding:6px;display:flex;flex-direction:column;gap:2px;font:inherit;}",
+			".dsh-github-chooser,.dsh-github-modal,.dsh-github-local{display:flex;flex-direction:column;gap:2px;padding:6px;min-height:0;flex:1;}",
+			".dsh-github-chooser-title,.dsh-github-modal-head,.dsh-github-card-status{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#8f8f98;padding:8px 10px 6px;}",
+			".dsh-github-choice,.dsh-github-dir{display:flex;align-items:center;gap:8px;width:100%;padding:10px 12px;border:0;border-radius:7px;background:transparent;color:#e6e6e8;cursor:pointer;text-align:left;font:inherit;font-size:13px;}",
+			".dsh-github-choice:hover,.dsh-github-dir:hover,.dsh-github-row:hover{background:rgba(255,255,255,.07);}",
 			".dsh-github-choice:disabled,.dsh-github-dir:disabled{opacity:.5;cursor:default;}",
-			".dsh-github-cancel{color:var(--dsw-alias-label-secondary,#555);}",
-			".dsh-github-modal-head{display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid var(--dsw-alias-border-l,rgba(0,0,0,.08));}",
-			".dsh-github-search{flex:1;min-width:0;padding:6px 8px;border:1px solid var(--dsw-alias-border-l,rgba(0,0,0,.15));border-radius:7px;background:var(--dsw-alias-bg-base,transparent);color:inherit;font:inherit;font-size:12px;}",
-			".dsh-github-list{max-height:300px;overflow:auto;display:flex;flex-direction:column;gap:2px;padding:2px;}",
+			".dsh-github-cancel{color:#9a9aa2;}",
+			".dsh-github-modal-head{display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:8px;margin-bottom:6px;}",
+			".dsh-github-search{flex:1;min-width:0;padding:7px 9px;border:1px solid rgba(255,255,255,.14);border-radius:7px;background:#1c1c21;color:#e6e6e8;font:inherit;font-size:12px;}",
+			".dsh-github-list{flex:1;min-height:220px;max-height:300px;overflow:auto;display:flex;flex-direction:column;gap:2px;padding:4px;}",
 			".dsh-github-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border-radius:7px;}",
 			".dsh-github-row-main{display:flex;flex-direction:column;gap:2px;min-width:0;}",
-			".dsh-github-row-title{font-weight:600;font-size:13px;}",
-			".dsh-github-row-desc{color:var(--dsw-alias-label-secondary,#555);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}",
-			".dsh-github-row-meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--dsw-alias-label-tertiary,#777);}",
-			".dsh-github-badge{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));padding:1px 6px;border-radius:999px;}",
-			".dsh-github-private{color:var(--dsw-alias-label-primary-dimmed,#888);}",
-			".dsh-github-empty,.dsh-github-error{color:var(--dsw-alias-label-secondary,#555);font-size:12px;padding:10px;}",
-			".dsh-github-error{color:#c0392b;}",
-			".dsh-github-import,.dsh-github-save{background:var(--dsw-alias-button-primary-fill,#2563eb);color:var(--dsw-alias-label-primary-inverted,#fff);border:0;border-radius:7px;padding:7px 12px;font:inherit;font-size:12px;cursor:pointer;}",
+			".dsh-github-row-title{font-weight:600;font-size:13px;color:#e6e6e8;}",
+			".dsh-github-row-desc{color:#8f8f98;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}",
+			".dsh-github-row-meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:11px;color:#8f8f98;}",
+			".dsh-github-badge{background:rgba(255,255,255,.08);padding:1px 6px;border-radius:999px;color:#b8b8be;}",
+			".dsh-github-private{color:#8f8f98;}",
+			".dsh-github-empty,.dsh-github-loading,.dsh-github-error{color:#9a9aa2;font-size:12px;padding:12px;text-align:center;}",
+			".dsh-github-error{color:#ff6b6b;}",
+			".dsh-github-import,.dsh-github-save{background:#3b82f6;color:#fff;border:0;border-radius:7px;padding:7px 12px;font:inherit;font-size:12px;cursor:pointer;}",
 			".dsh-github-import:disabled,.dsh-github-save:disabled{opacity:.6;cursor:default;}",
-			".dsh-github-load-more,.dsh-github-back,.dsh-github-close,.dsh-github-mkdir,.dsh-github-up,.dsh-github-clear,.dsh-github-cancel{background:transparent;border:1px solid var(--dsw-alias-border-l,rgba(0,0,0,.15));border-radius:7px;padding:7px 12px;color:var(--dsw-alias-label-primary,#111);font:inherit;font-size:12px;cursor:pointer;}",
-			".dsh-github-modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:8px 6px 2px;}",
+			".dsh-github-load-more,.dsh-github-back,.dsh-github-close,.dsh-github-mkdir,.dsh-github-up,.dsh-github-clear,.dsh-github-cancel{background:transparent;border:1px solid rgba(255,255,255,.14);border-radius:7px;padding:7px 12px;color:#e6e6e8;font:inherit;font-size:12px;cursor:pointer;}",
+			".dsh-github-load-more{display:block;margin:6px auto;}",
+			".dsh-github-modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:8px 6px 4px;}",
 			".dsh-github-local-controls{display:flex;gap:8px;padding:8px 10px;align-items:center;}",
-			".dsh-github-new-name{flex:1;padding:6px 8px;border:1px solid var(--dsw-alias-border-l,rgba(0,0,0,.15));border-radius:7px;background:var(--dsw-alias-bg-base,transparent);color:inherit;font:inherit;font-size:12px;}",
-			".dsh-github-path{font-size:11px;font-weight:400;color:var(--dsw-alias-label-tertiary,#777);}",
-			".dsh-github-field{display:flex;flex-direction:column;gap:4px;padding:6px 10px;font-size:12px;color:var(--dsw-alias-label-secondary,#555);}",
-			".dsh-github-field input[type=text],.dsh-github-field input[type=password],.dsh-github-field input:not([type=checkbox]){padding:6px 8px;border:1px solid var(--dsw-alias-border-l,rgba(0,0,0,.15));border-radius:7px;background:var(--dsw-alias-bg-base,transparent);color:inherit;font:inherit;}",
-			".dsh-github-card-status{display:flex;align-items:center;gap:6px;font-weight:600;}",
+			".dsh-github-new-name{flex:1;padding:7px 9px;border:1px solid rgba(255,255,255,.14);border-radius:7px;background:#1c1c21;color:#e6e6e8;font:inherit;font-size:12px;}",
+			".dsh-github-path{font-size:11px;font-weight:400;color:#8f8f98;}",
+			".dsh-github-field{display:flex;flex-direction:column;gap:4px;padding:6px 10px;font-size:12px;color:#8f8f98;}",
+			".dsh-github-field input[type=text],.dsh-github-field input[type=password],.dsh-github-field input:not([type=checkbox]){padding:6px 8px;border:1px solid rgba(255,255,255,.14);border-radius:7px;background:#1c1c21;color:#e6e6e8;font:inherit;}",
+			".dsh-github-card-status{display:flex;align-items:center;gap:6px;font-weight:600;color:#e6e6e8;}",
 			".dsh-github-card-detail{font-weight:400;text-transform:none;}",
 			".dsh-github-card-actions{display:flex;gap:8px;padding:8px 10px 4px;}"
 		].join("\n");
@@ -147,9 +142,11 @@ window.__ModuleLoader__.load({
 					? React.createElement("div", { className: "dsh-github-error" }, error)
 					: null,
 				React.createElement("div", { className: "dsh-github-list" },
-					(filtered.length === 0 && !loading)
-						? React.createElement("div", { className: "dsh-github-empty" }, "No repositories")
-						: filtered.map((it) => React.createElement("div", { className: "dsh-github-row", key: it.fullName },
+					loading && items.length === 0
+						? React.createElement("div", { className: "dsh-github-loading" }, "Loading repositories…")
+						: filtered.length === 0 && !loading
+							? React.createElement("div", { className: "dsh-github-empty" }, "No repositories")
+							: filtered.map((it) => React.createElement("div", { className: "dsh-github-row", key: it.fullName },
 							React.createElement("div", { className: "dsh-github-row-main" },
 								React.createElement("div", { className: "dsh-github-row-title" }, it.fullName),
 								it.description
@@ -219,9 +216,11 @@ window.__ModuleLoader__.load({
 					React.createElement("input", { className: "dsh-github-new-name", placeholder: "New folder name", value: newName, onChange: (e) => setNewName(e.target.value) }),
 					React.createElement("button", { className: "dsh-github-mkdir", disabled: !newName.trim() || loading, onClick: makeDir }, "Create")),
 				React.createElement("div", { className: "dsh-github-list dsh-github-list-local" },
-					(entries.length === 0 && !loading)
-						? React.createElement("div", { className: "dsh-github-empty" }, "No subfolders")
-						: entries.map((name) => React.createElement("button", {
+					loading && path === ""
+						? React.createElement("div", { className: "dsh-github-loading" }, "Loading…")
+						: (entries.length === 0 && !loading)
+							? React.createElement("div", { className: "dsh-github-empty" }, "No subfolders")
+							: entries.map((name) => React.createElement("button", {
 							className: "dsh-github-dir",
 							key: name,
 							disabled: loading,
