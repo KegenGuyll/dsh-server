@@ -5,24 +5,20 @@
  * profile with no manual step. The profile lives in the persistent $DSH_HOME
  * volume, so the plugin and its dependencies survive image rebuilds.
  *
- * Steps (each guarded so a fresh container after a partial install re-runs and
- * a rebuild refreshes the plugin only when the version changes):
- *   1. Ensure the `web` profile exists (packaged by the shipped web template).
- *   2. Install the plugin package into the profile node_modules via
- *      `dsh plugin --profile web add <pkg>`, which also resolves its
- *      dependencies (requires `pnpm` on PATH, added in the image).
- *   3. Idempotently add the `github` loader `insert` row to cordis.patch.yml.
- *   4. Record a version marker; re-run install when the marker version differs.
+ * Registration is handled by the harness's own bundle mechanism: this package
+ * declares `dsh.bundle.patch`, so `dsh plugin --profile web add <pkg>` installs
+ * it AND appends it to `dsh.profile.bundles`. The bundle's `cordis.patch.yml`
+ * then inserts the `github` row and disables the directory-picker row. The
+ * installer therefore does NOT hand-edit the profile's cordis.patch.yml.
  *
- * The directory-picker client-flow/composition adjustment is intentionally left
- * OUT here and documented in the README: the plugin's chooser occupies the two
- * single-kind directory-flow holes, so the directory-picker BACKEND must stay
- * mounted while its own client-flow contribution must not be. Seeing both
- * requires a small profile composition edit (or a forked backend), which is a
- * deployment decision rather than a silent script action — see README §"directory
- * picker composition".
+ * Steps:
+ *   1. Repair a cordis.patch.yml left invalid by an earlier installer bug
+ *      (a flow `[]` followed by block items is not valid YAML).
+ *   2. Install/refresh the plugin via `dsh plugin --profile web add <pkg>`,
+ *      gated by a version marker so a rebuild with a newer version refreshes
+ *      it and an unchanged boot is a no-op.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -32,52 +28,32 @@ const SELF_DIR = dirname(fileURLToPath(import.meta.url));
 const DSH_HOME = process.env.DSH_HOME || join(os.homedir(), ".dsh");
 const PROFILE = "web";
 const PROFILE_DIR = join(DSH_HOME, "profiles", PROFILE);
-const NODE_MODULES = join(PROFILE_DIR, "node_modules");
+const PATCH_FILE = join(PROFILE_DIR, "cordis.patch.yml");
 const PACKAGE = "dsh-github";
 const MARKER = join(PROFILE_DIR, `.${PACKAGE}.installed`);
-const MINI = { e: (m) => { process.stderr.write(`dsh-github: ${m}\n`); } };
+/** A valid empty patch document — the plugin's own bundle patch supplies the row. */
+const EMPTY_PATCH = "# patch layer (see dsh profiles)\n[]\n";
 
-/** Shipped web profile template (mirrors dsh-app-boot's web template). */
-const BUNDLES = ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"];
+const e = (m) => process.stderr.write(`dsh-github: ${m}\n`);
 
-function ensureProfile() {
-	if (existsSync(join(PROFILE_DIR, "package.json"))) return;
-	mkdirSync(PROFILE_DIR, { recursive: true });
-	mkdirSync(NODE_MODULES, { recursive: true });
-	writeFileSync(join(PROFILE_DIR, "package.json"), JSON.stringify({
-		name: "dsh-profile-web",
-		private: true,
-		dependencies: {},
-		dsh: { profile: { bundles: BUNDLES } }
-	}, null, 2) + "\n");
-	writeFileSync(join(PROFILE_DIR, "cordis.yml"), "# dsh profile root — compose via cordis.patch.yml\n[]\n");
-	writeFileSync(join(PROFILE_DIR, "cordis.patch.yml"), "# patch layer (see dsh profiles)\n[]\n");
-	writeFileSync(join(PROFILE_DIR, "pnpm-workspace.yaml"), "packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n");
-	MINI.e(`initialized ${PROFILE} profile at ${PROFILE_DIR}`);
-}
-
-/** The patch block: the `github` insert row plus the directory-picker disable. */
-function patchBlock() {
-	return `# dsh-github: GitHub + local workspace import (token via Settings → Plugins → GitHub).\n`
-		+ `- insert:\n    - id: github\n      name: '${PACKAGE}'\n`
-		+ `\n# dsh-github owns the two single-kind directory-flow holes, so disable the\n# harness directory-picker row (its client flow would otherwise collide).\n`
-		+ `- id: directory-picker\n  disabled: true\n`;
-}
-
-/** Add the `github` loader insert row (+ dir-picker disable) idempotently. */
-function patchCordis() {
-	const patch = join(PROFILE_DIR, "cordis.patch.yml");
-	const raw = existsSync(patch) ? readFileSync(patch, "utf8") : "";
-	if (raw.includes("id: github")) return false;
-	const text = raw.trim();
-	// Empty document or a bare `[]` must become a real sequence before appending.
-	if (text === "" || text === "[]") {
-		writeFileSync(patch, patchBlock());
+/**
+ * Repair a profile patch that an earlier installer bug left invalid: a flow
+ * empty sequence (`[]`) followed by block-sequence items is not valid YAML.
+ * Detect that (or the plugin's own previously-injected rows) and rewrite the
+ * file to a valid empty sequence with no user content loss (a real,
+ * block-sequence profile — e.g. with an MCP client — is left untouched).
+ */
+function repairCordisPatch() {
+	if (!existsSync(PATCH_FILE)) return false;
+	const raw = readFileSync(PATCH_FILE, "utf8");
+	const hasBareFlow = /(^|\n)\s*\[\]\s*(\n|$)/.test(raw);
+	const hasBlockItem = /(^|\n)\s*-\s+\S/.test(raw);
+	const hasGithubRow = raw.includes("id: github");
+	if (hasGithubRow || (hasBareFlow && hasBlockItem)) {
+		writeFileSync(PATCH_FILE, EMPTY_PATCH);
 		return true;
 	}
-	// Existing sequence: append as another item.
-	writeFileSync(patch, text + "\n\n" + patchBlock());
-	return true;
+	return false;
 }
 
 /** Install/refresh the plugin into the profile via the dsh CLI (uses pnpm). */
@@ -86,6 +62,7 @@ function installPlugin() {
 	const pkgJson = JSON.parse(readFileSync(join(SELF_DIR, "package.json"), "utf8"));
 	const ver = pkgJson.version;
 	if (beforeVer === ver) return false; // up to date
+
 	const result = spawnSync("dsh", ["plugin", "--profile", PROFILE, "add", SELF_DIR], {
 		stdio: "inherit",
 		shell: process.platform === "win32"
@@ -99,12 +76,10 @@ function installPlugin() {
 }
 
 function main() {
-	ensureProfile();
-	let changed = false;
+	let changed = repairCordisPatch();
+	if (changed) e(`repaired ${PROFILE} profile cordis.patch.yml`);
 	if (installPlugin()) changed = true;
-	if (patchCordis()) changed = true;
-	if (changed) MINI.e(`registered ${PACKAGE} in profile ${PROFILE}`);
-	else MINI.e(`${PACKAGE} already installed (version up to date)`);
+	e(changed ? `registered ${PACKAGE} in profile ${PROFILE}` : `${PACKAGE} already installed (version up to date)`);
 }
 
 main();

@@ -1,6 +1,6 @@
 {
   "name": "dsh-github",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DeepSeek Harness plugin: add an 'Import from GitHub' option to the Add-workspace flow and clone/register GitHub repos as DSH workspaces via a personal access token.",
   "type": "module",
   "main": "lib/index.js",
@@ -17,6 +17,9 @@
     "./package.json": "./package.json"
   },
   "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "inject": [
@@ -31,6 +34,7 @@
     "lib/index.js",
     "lib/types/**/*.d.ts",
     "lib/client.js",
+    "cordis.patch.yml",
     "install.mjs"
   ],
   "license": "MIT",

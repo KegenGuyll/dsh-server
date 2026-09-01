@@ -13,9 +13,10 @@ token/status card under **Settings → Plugins → Plugin configuration**.
   like a local pick.
 
 **Option B:** the plugin owns the local pick too, so it is fully self-contained —
-it does not depend on the harness directory-picker backend, and the installer
-disables the `directory-picker` row so its client flow does not collide with this
-plugin's chooser in the two `single`-kind directory-flow holes.
+it does not depend on the harness directory-picker backend, and its bundle patch
+(`cordis.patch.yml`) disables the `directory-picker` row so that client flow does
+not collide with this plugin's chooser in the two `single`-kind directory-flow
+holes.
 
 The token is a fine-grained GitHub PAT. It is stored through the DSH credentials
 domain (default ref `GITHUB_TOKEN`) and resolved **per operation** on the host,
@@ -74,25 +75,28 @@ Methods:
 ## Composition
 
 The chooser occupies the two `single`-kind directory-flow holes
-(`sidebar.workspaces.directoryFlow`, `conversation.hero.workspace.directoryFlow`).
-Because the plugin owns the local pick (Option B), the harness directory-picker
-row is **disabled** by the installer so its client flow does not collide with the
-stopper chooser in those holes. Directory selection is then provided entirely by
-this plugin (`github/local-list` / `github/local-create`).
+(`sidebar.workspaces.directoryFlow`, `conversation.hero.workspace.directoryFlow`),
+and the plugin owns the local pick (Option B). It is registered as a **bundle**
+(`dsh.bundle.patch`), so its `cordis.patch.yml` is composed automatically:
+it inserts the `github` row and disables the harness `directory-picker` row so
+that client flow does not collide in those holes. Directory selection is
+provided entirely by the plugin (`github/local-list` / `github/local-create`).
 
 ## Installation
 
-Auto-installed from the image by `entrypoint.sh`:
+The package declares `dsh.bundle.patch`, so `dsh plugin --profile web add <pkg>`
+installs it **and** appends it to `dsh.profile.bundles`; the bundle patch then
+registers the row. `entrypoint.sh` runs the idempotent installer:
 
 ```sh
 node /opt/dsh-github/install.mjs
 ```
 
-This initializes the `web` profile if needed, runs
-`dsh plugin --profile web add /opt/dsh-github`, and idempotently appends the
-`github` loader row and the `directory-picker` disable to
-`profiles/web/cordis.patch.yml`. A version marker in the profile makes it refresh
-the plugin on an image version change and skip on an unchanged boot.
+It (1) repairs a profile `cordis.patch.yml` left invalid by an earlier installer
+bug, then (2) runs `dsh plugin --profile web add /opt/dsh-github`, gated by a
+version marker so a rebuild with a newer version refreshes the plugin and an
+unchanged boot is a no-op. It does not hand-edit the profile's
+`cordis.patch.yml`.
 
 ## Verification status
 
