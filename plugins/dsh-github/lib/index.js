@@ -12,9 +12,61 @@
  */
 
 import z from "@deepseek-ai/schemastery";
-import { join, dirname, isAbsolute } from "node:path";
+import { join, dirname, isAbsolute, basename } from "node:path";
 import { readdir, mkdir } from "node:fs/promises";
+import { homedir } from "node:os";
 import { listUserRepos, getRepo, gitClone, slug } from "./github.js";
+
+/** Build a typed directory-picker failure ({@link DirectoryPickerError})-shaped error. */
+function dirError(code, path, message) {
+	const error = new Error(message);
+	error.code = code;
+	error.path = path;
+	return error;
+}
+
+/**
+ * Browse-capability `list`: one directory level plus its ancestry, matching the
+ * harness's `DirectoryListing` contract. Reused by the api gateway, which
+ * injects `directoryPicker`; the client module system then serves it to any
+ * consumer that still uses the directory-picker remote.
+ */
+async function listDir(path) {
+	const target = path && isAbsolute(path) ? path : homedir();
+	let dirents;
+	try {
+		dirents = await readdir(target, { withFileTypes: true });
+	} catch {
+		throw dirError("directory-unreadable", target, `cannot list directory '${target}'`);
+	}
+	const entries = dirents
+		.filter((d) => d.isDirectory())
+		.map((d) => ({ name: d.name, path: join(target, d.name), hidden: d.name.startsWith(".") }))
+		.sort((a, b) => a.name.localeCompare(b.name));
+	const crumbs = [];
+	let cursor = join(target);
+	for (;;) {
+		crumbs.unshift({ name: dirname(cursor) === cursor ? cursor : basename(cursor) || cursor, path: cursor, hidden: false });
+		if (dirname(cursor) === cursor) break;
+		cursor = dirname(cursor);
+	}
+	return { path: join(target), home: homedir(), crumbs, entries, truncated: false };
+}
+
+/** Browse-capability `createDirectory`: one child directory, non-recursive. */
+async function createDir(path, name) {
+	if (!name || typeof name !== "string" || /[\\/]/.test(name) || name === "." || name === "..") {
+		throw dirError("directory-create-failed", path, "directory name must be a single non-blank path segment");
+	}
+	const target = join(path, name);
+	try {
+		await mkdir(target, { recursive: false });
+	} catch (error) {
+		if (error?.code === "EEXIST") throw dirError("directory-exists", target, `'${name}' already exists`);
+		throw dirError("directory-create-failed", target, String(error?.message ?? error));
+	}
+	return target;
+}
 
 /**
  * Brand a raw string as a credential reference name (a POSIX shell identifier).
@@ -180,6 +232,13 @@ function registerHandlers(ctx, scope) {
 function apply(ctx, config) {
 	const scope = ctx.settings.register("github", Config, { base: config });
 	registerHandlers(ctx, scope);
+	// Provide the directoryPicker service (a browse capability backed by our fs
+	// helpers) because the api gateway (`@deepseek-ai/dsh-host-apiproxy`)
+	// injects it. The harness directory-picker row is disabled in the bundle
+	// patch, so this replaces it: no duplicate service, and its client flow does
+	// not collide with our chooser in the two single-kind directory-flow holes.
+	const capability = { kind: "browse", list: listDir, createDirectory: createDir };
+	ctx.provide("directoryPicker", { capability: () => capability });
 }
 
 export { Config, name, inject, apply, DEFAULT_CLONE_ROOT, resolveToken, createWorkspaceFromRepo };

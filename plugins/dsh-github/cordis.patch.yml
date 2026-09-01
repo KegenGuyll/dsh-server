@@ -7,6 +7,9 @@
 #   - Disable the harness `directory-picker` row: this plugin's chooser owns the
 #     two single-kind directory-flow holes, so the directory-picker's own client
 #     flow must not also occupy them (a second single-kind occupant fails at load).
+#     The plugin provides the `directoryPicker` service itself (a browse
+#     capability backed by its own fs helpers), so the api gateway — which
+#     injects it — still starts.
 
 - insert:
     - id: github
