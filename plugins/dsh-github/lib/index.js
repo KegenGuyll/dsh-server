@@ -239,6 +239,9 @@ function registerHandlers(ctx, scope) {
 			}
 			return { ok: true, value };
 		} catch (error) {
+			// Log the full detail server-side so a client-side terse message can
+			// still be debugged from the container log.
+			ctx.logger?.error(`github RPC ${endpoint} failed: ${String(error?.message ?? error)}${error?.stack ? `\n${error.stack}` : ""}`);
 			return { ok: false, error: { code: "internal", message: String(error?.message ?? error), details: {} } };
 		}
 	}, { authority: "trusted-host" });
