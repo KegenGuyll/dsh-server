@@ -31,7 +31,6 @@ The deploy agent writes these into `services/dsh-server/.env` on the server
 | Variable          | Meaning                                                        |
 |-------------------|----------------------------------------------------------------|
 | `TAG`             | Image tag (`sha-<commit>`), written by the deploy agent        |
-| `TS_AUTHKEY`      | Tailscale auth key for the sidecar                             |
 | `TS_HOSTNAME`     | Optional; MagicDNS hostname (default `dsh`)                    |
 | `DEEPSEEK_API_KEY`| DeepSeek API key (or configure in the web UI Models page)      |
 | `DSH_TRUSTED_HOST`| Must equal the hostname browsers use, e.g. `dsh.<tailnet>.ts.net` |
