@@ -8,10 +8,11 @@
 FROM node:22-slim
 
 # node:zlib's Zstandard API (used for session logs) requires Node >= 22.11;
-# node:22-slim tracks the latest 22.x. git is required by the dsh-github plugin
-# to clone repositories into workspaces (node:22-slim does not ship it).
+# node:22-slim tracks the latest 22.x. git and ca-certificates are required by
+# the dsh-github plugin to clone repositories into workspaces (node:22-slim ships
+# neither; without ca-certificates git fails TLS verification: "CAfile: none").
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git \
+  && apt-get install -y --no-install-recommends git ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g @deepseek-ai/dsh@0.1.1-rc.2 \
   && npm install -g pnpm
