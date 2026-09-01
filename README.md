@@ -17,10 +17,46 @@ for the full design, the shared-network-namespace rationale, and the
 ## Layout
 
 ```
-Dockerfile                     node:22-slim + npm i -g @deepseek-ai/dsh@<pinned>
-entrypoint.sh                  dsh web --host 127.0.0.1 --port 3080 --no-open --trusted-host "$DSH_TRUSTED_HOST"
+Dockerfile                     node:22-slim + npm i -g @deepseek-ai/dsh@<pinned> + pnpm
+entrypoint.sh                  node /opt/dsh-github/install.mjs (idempotent) then
+                               dsh web --host 127.0.0.1 --port 3080 --no-open --trusted-host "$DSH_TRUSTED_HOST"
+plugins/dsh-github/            out-of-tree GitHub workspace-import plugin (host + client bundle + installer)
 .github/workflows/deploy.yml   calls personal-pipeline's reusable deploy-service.yml
 ```
+
+## dsh-github plugin
+
+The image ships an out-of-tree plugin, `dsh-github`, that turns the workspace
+"Add workspace…" control into a two-option chooser:
+
+- **Add local workspace** — delegates to the directory-picker backend, exactly
+  as before.
+- **Import from GitHub** — a modal that lists your repositories (with a search
+  filter and pagination); clicking **Import** on a repo clones it into the
+  workspace root and registers it as a real workspace.
+
+A **GitHub** card appears under **Settings → Plugins → Plugin configuration**
+where you paste a personal access token (written to the credentials domain, so
+the value never leaves the host), set the clone root, and see connection status.
+The `GITHUB_TOKEN` env var (or the Settings card) supplies the token; the
+card's token write is the usual way, so `.env` usually stays unset.
+
+The plugin is **auto-installed** from the image by `entrypoint.sh` on first boot:
+`install.mjs` initializes the `web` profile if needed, installs the package via
+`dsh plugin --profile web add /opt/dsh-github`, and idempotently adds the
+`github` loader row (and disables the directory-picker row) to
+`profiles/web/cordis.patch.yml`. Installation is guarded by a version marker in
+the profile, so a rebuilt image with a newer plugin version refreshes it while
+the persistent `/data` volume survives.
+
+### Local picking
+
+The chooser is fully self-contained: "Add local workspace" uses a compact local
+directory dialog provided by the plugin (`github/local-list` / `github/local-create`),
+and "Import from GitHub" clones and registers a repo. Because the plugin owns the
+two `single`-kind directory-flow holes, the harness directory-picker row is
+disabled by the installer (its client flow would otherwise collide) — local
+directory selection is provided entirely by the plugin.
 
 ## Runtime contract
 
