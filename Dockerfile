@@ -17,6 +17,16 @@ RUN apt-get update \
   && npm install -g @deepseek-ai/dsh@0.1.1-rc.2 \
   && npm install -g pnpm
 
+# Loosen the settings/credentials configuration plane so it honors --trusted-host
+# instead of being pinned to loopback. Upstream keeps these privileged methods
+# (settings.describe/update/mutate, credentials.*, agentPreset.*,
+# llm.discoverModels) loopback-only until a real auth layer exists; this
+# deployment's auth boundary is the tailnet (docs/dsh.md). The patch script is
+# idempotent and fails the build loudly if the upstream layout changes so the
+# deviation is never silently dropped on a dsh upgrade.
+COPY patches/trusted-config-plane.mjs /patches/trusted-config-plane.mjs
+RUN node /patches/trusted-config-plane.mjs
+
 # The out-of-tree dsh-github plugin (host + client bundle + idempotent installer)
 # is baked into the image; entrypoint.sh auto-installs it into the web profile
 # on first boot. The plugin is resolved at its real path (/opt/dsh-github), so its
