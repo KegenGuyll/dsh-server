@@ -26,6 +26,12 @@ if [ -e /opt/dsh-mobile/install.mjs ]; then
   node /opt/dsh-mobile/install.mjs
 fi
 
+# Auto-install the dsh-stt plugin (browser-only speech-to-text composer mic)
+# into the web profile, same idempotent version-marker-gated flow.
+if [ -e /opt/dsh-stt/install.mjs ]; then
+  node /opt/dsh-stt/install.mjs
+fi
+
 exec dsh web \
   --host 127.0.0.1 \
   --port 3080 \

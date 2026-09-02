@@ -20,9 +20,11 @@ for the full design, the shared-network-namespace rationale, and the
 Dockerfile                     node:22-slim + npm i -g @deepseek-ai/dsh@<pinned> + pnpm
 entrypoint.sh                  node /opt/dsh-github/install.mjs (idempotent), then
                                node /opt/dsh-mobile/install.mjs (idempotent), then
+                               node /opt/dsh-stt/install.mjs (idempotent), then
                                dsh web --host 127.0.0.1 --port 3080 --no-open --trusted-host "$DSH_TRUSTED_HOST"
 plugins/dsh-github/            out-of-tree GitHub workspace-import plugin (host + client bundle + installer)
 plugins/dsh-mobile/            Gemini-style mobile skin (client bundle + installer; hides the menu, adds New Session)
+plugins/dsh-stt/               out-of-tree speech-to-text composer mic plugin (browser-only + installer)
 .github/workflows/deploy.yml   calls personal-pipeline's reusable deploy-service.yml
 ```
 
@@ -91,6 +93,26 @@ module scan serves its bundle. Like dsh-github it is a bundle
 (`dsh.bundle.patch`) auto-installed by `entrypoint.sh` via an idempotent,
 version-marker-gated `install.mjs`; nothing ships in the prompt path. See
 [`plugins/dsh-mobile/README.md`](plugins/dsh-mobile/README.md).
+
+## dsh-stt plugin
+
+The image also ships an out-of-tree browser-only plugin, `dsh-stt`, that adds
+speech-to-text to the composer: a **microphone button** in the prompt's tool
+row (right of the model selector, before the send button).
+
+- Click the mic to start recording; the browser's Web Speech API transcribes
+  **continuously until you click the mic again to stop** (silence does not stop
+  it). Interim text streams into the prompt live; the final transcript is
+  committed on stop.
+- Works in **Chrome/Edge/Safari**; in Firefox the button disables with a
+  tooltip (no Web Speech API).
+- Everything runs in the browser — no host half, no API keys, no networking.
+  Text already in the prompt is preserved (only the recording region is
+  replaced, via the composer's `inputActions.setDraft`).
+
+Same bundle install flow as `dsh-github`: `dsh.bundle.patch` →
+`cordis.patch.yml` inserts the `stt` row, and `entrypoint.sh` runs its
+idempotent, version-marker-gated `install.mjs`.
 
 ## Runtime contract
 
