@@ -1,0 +1,14 @@
+# dsh-notify bundle patch, applied automatically when this package is listed in
+# dsh.profile.bundles (the dsh CLI adds it there on `dsh plugin add` because this
+# package declares dsh.bundle.patch).
+#
+#   - Insert the host/service row for the plugin itself. The loader resolves
+#     `dsh-notify` from the profile's node_modules. The `notify` row is what lets
+#     the client module system scan the package and serve its `./client` bundle
+#     (the client scan keys off host Loader entries that declare `dsh.client`).
+#   - No shipped rows are disabled: the plugin is additive and leaves the
+#     sidebar, conversation, settings, and prompt bar untouched.
+
+- insert:
+    - id: notify
+      name: 'dsh-notify'

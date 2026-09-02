@@ -32,6 +32,12 @@ if [ -e /opt/dsh-stt/install.mjs ]; then
   node /opt/dsh-stt/install.mjs
 fi
 
+# Auto-install the dsh-notify plugin (ntfy push on task-complete / needs-input)
+# into the web profile, same idempotent version-marker-gated flow.
+if [ -e /opt/dsh-notify/install.mjs ]; then
+  node /opt/dsh-notify/install.mjs
+fi
+
 exec dsh web \
   --host 127.0.0.1 \
   --port 3080 \
