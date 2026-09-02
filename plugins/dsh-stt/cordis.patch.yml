@@ -1,0 +1,10 @@
+# dsh-stt bundle patch, applied automatically when this package is listed in
+# dsh.profile.bundles (the dsh CLI adds it there on `dsh plugin add` because this
+# package declares dsh.bundle.patch).
+#
+#   - Insert the host/service row for the plugin itself. The loader resolves
+#     `dsh-stt` from the profile's node_modules. The browser half rides the
+#     package's `dsh.client` declaration — no host-side behavior is provided.
+- insert:
+    - id: stt
+      name: 'dsh-stt'

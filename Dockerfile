@@ -37,6 +37,16 @@ RUN cd /opt/dsh-mobile \
   && npm install --omit=dev --no-audit --no-fund --ignore-scripts --legacy-peer-deps \
   && rm -rf node_modules/.cache
 
+# The out-of-tree dsh-stt plugin (browser-only speech-to-text composer mic +
+# idempotent installer) is baked into the image; entrypoint.sh auto-installs it
+# into the web profile on first boot. It has no runtime imports of its own (all
+# work runs in the browser), so the install step is a no-op placeholder kept for
+# symmetry with the other plugins in case a host half is added later.
+COPY --chown=node:node plugins/dsh-stt /opt/dsh-stt
+RUN cd /opt/dsh-stt \
+  && npm install --omit=dev --no-audit --no-fund --ignore-scripts --legacy-peer-deps \
+  && rm -rf node_modules/.cache
+
 # /data     = $DSH_HOME (sessions, settings.yaml, credentials, web profile)
 # /workspaces = the agent's cwd (project checkouts)
 # Ownership is baked into the image so freshly created named volumes inherit
