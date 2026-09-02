@@ -27,6 +27,16 @@ RUN apt-get update \
 COPY patches/trusted-config-plane.mjs /patches/trusted-config-plane.mjs
 RUN node /patches/trusted-config-plane.mjs
 
+# The DSH *client* also pins the settings plane to loopback: the settings mirror
+# and per-namespace scope are created with `connection.isLoopback ? "host" :
+# "memory"`, so a page served over the trusted tailnet FQDN leaves the mirror
+# "memory" (unavailable) and the UI fails with "settings are unavailable in this
+# browser" even though the server fence above accepts the request. Pin both to
+# "host" so the browser reads/writes settings over the wire; the server fence is
+# the authoritative gate. Same idempotent + fail-loud contract as above.
+COPY patches/client-loopback-settings.mjs /patches/client-loopback-settings.mjs
+RUN node /patches/client-loopback-settings.mjs
+
 # The out-of-tree dsh-github plugin (host + client bundle + idempotent installer)
 # is baked into the image; entrypoint.sh auto-installs it into the web profile
 # on first boot. The plugin is resolved at its real path (/opt/dsh-github), so its
