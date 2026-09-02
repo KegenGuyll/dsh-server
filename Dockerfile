@@ -71,13 +71,27 @@ RUN cd /opt/dsh-stt \
 # /workspaces = the agent's cwd (project checkouts)
 # Ownership is baked into the image so freshly created named volumes inherit
 # the node user instead of root.
-RUN mkdir -p /data /workspaces && chown -R node:node /data /workspaces
+RUN mkdir -p /data /data/gh /workspaces && chown -R node:node /data /workspaces
+
+# gh CLI for the harness agent: lets the agent git-push and open PRs without a
+# per-session download. The auth token lives on the persistent dsh-data volume
+# via GH_CONFIG_DIR below, so once a device-flow login is done the token
+# survives container recreation and gh is authenticated on every boot.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl \
+  && rm -rf /var/lib/apt/lists/* \
+  && GH_ARCH=$(uname -m | sed -E 's/x86_64/amd64/; s/aarch64|arm64/arm64/') \
+  && curl -fsSL "https://github.com/cli/cli/releases/download/v2.99.0/gh_2.99.0_linux_${GH_ARCH}.tar.gz" -o /tmp/gh.tgz \
+  && tar -C /tmp -xzf /tmp/gh.tgz \
+  && install -m 0755 "/tmp/gh_2.99.0_linux_${GH_ARCH}/bin/gh" /usr/local/bin/gh \
+  && rm -rf "/tmp/gh_2.99.0_linux_${GH_ARCH}" /tmp/gh.tgz
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV DSH_HOME=/data \
-    DSH_TELEMETRY_DISABLED=1
+    DSH_TELEMETRY_DISABLED=1 \
+    GH_CONFIG_DIR=/data/gh
 
 USER node
 WORKDIR /workspaces
