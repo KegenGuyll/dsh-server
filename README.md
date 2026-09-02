@@ -14,6 +14,12 @@ See [`docs/dsh.md`](https://github.com/KegenGuyll/personal-pipeline/blob/main/do
 for the full design, the shared-network-namespace rationale, and the
 `--trusted-host` trust-fence requirement.
 
+The image bakes the GitHub CLI for the harness agent so it can push commits and
+open PRs without per-session setup. Read
+[`docs/gh-agent-auth.md`](docs/gh-agent-auth.md) for how `gh` is authenticated,
+where its token lives (persistent `/data/gh`), and how to re-authenticate if
+needed.
+
 ## Layout
 
 ```
