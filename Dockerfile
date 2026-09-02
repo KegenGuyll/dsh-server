@@ -28,6 +28,15 @@ RUN cd /opt/dsh-github \
   && npm install --omit=dev --no-audit --no-fund --ignore-scripts --legacy-peer-deps \
   && rm -rf node_modules/.cache
 
+# The dsh-mobile plugin is client-only (its client bundle is served by the harness
+# client module system, and it declares `dsh.bundle.patch`), so the only reason to
+# npm-install here is to make it resolvable at its real path (/opt/dsh-mobile) for
+# the auto-installer. It has no runtime deps beyond the harness-provided peer.
+COPY --chown=node:node plugins/dsh-mobile /opt/dsh-mobile
+RUN cd /opt/dsh-mobile \
+  && npm install --omit=dev --no-audit --no-fund --ignore-scripts --legacy-peer-deps \
+  && rm -rf node_modules/.cache
+
 # /data     = $DSH_HOME (sessions, settings.yaml, credentials, web profile)
 # /workspaces = the agent's cwd (project checkouts)
 # Ownership is baked into the image so freshly created named volumes inherit
