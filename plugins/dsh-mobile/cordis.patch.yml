@@ -1,0 +1,15 @@
+# dsh-mobile bundle patch, applied automatically when this package is listed in
+# dsh.profile.bundles (the dsh CLI adds it there on `dsh plugin add` because this
+# package declares dsh.bundle.patch).
+#
+#   - Insert the host/service row for the plugin itself. The loader resolves
+#     `dsh-mobile` from the profile's node_modules. The `mobile` row is what lets
+#     the client module system scan the package and serve its `./client` bundle
+#     (the scan keys off host Loader entries that declare `dsh.client`). The host
+#     half is a no-op; all the work is in the client skin.
+#   - No shipped rows are disabled: the skin is additive and leaves the sidebar,
+#     session header, and prompt bar intact on desktop.
+
+- insert:
+    - id: mobile
+      name: 'dsh-mobile'

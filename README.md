@@ -18,9 +18,11 @@ for the full design, the shared-network-namespace rationale, and the
 
 ```
 Dockerfile                     node:22-slim + npm i -g @deepseek-ai/dsh@<pinned> + pnpm
-entrypoint.sh                  node /opt/dsh-github/install.mjs (idempotent) then
+entrypoint.sh                  node /opt/dsh-github/install.mjs (idempotent), then
+                               node /opt/dsh-mobile/install.mjs (idempotent), then
                                dsh web --host 127.0.0.1 --port 3080 --no-open --trusted-host "$DSH_TRUSTED_HOST"
 plugins/dsh-github/            out-of-tree GitHub workspace-import plugin (host + client bundle + installer)
+plugins/dsh-mobile/            Gemini-style mobile skin (client bundle + installer; hides the menu, adds New Session)
 .github/workflows/deploy.yml   calls personal-pipeline's reusable deploy-service.yml
 ```
 
@@ -59,6 +61,36 @@ and "Import from GitHub" clones and registers a repo. Because the plugin owns th
 two `single`-kind directory-flow holes, the harness directory-picker row is
 disabled by the installer (its client flow would otherwise collide) — local
 directory selection is provided entirely by the plugin.
+
+## dsh-mobile plugin
+
+The image also ships an out-of-tree **client-only** plugin, `dsh-mobile`, that adds
+a Gemini-style mobile skin to the web UI. At mobile widths it:
+
+- Hides the left workspace/session menu and the session header (the shipped
+  sidebar and header are collapsed away), so the conversation + prompt bar fill
+  the screen.
+- Adds a floating **top bar**: a hamburger (top-left), the **current session
+  name** (center, falling back to the workspace title), and a **New Session**
+  button (top-right) that creates a new session in the current workspace.
+- Opens a lightweight **drawer** when the hamburger is tapped, matching the
+  desktop sidebar: a **search bar** at the top filters sessions by title, each
+  workspace is a **folder-icon header row** with a **plus button at the right**
+  that starts a new session there, and each session row shows its **relative
+  last-used time** (e.g. `5min`, `1h`, `5d`). Tapping a session opens it; a
+  translucent backdrop dismisses the drawer.
+- Leaves the **prompt bar** untouched.
+
+The drawer is the plugin's own workspace → session list built from the
+`useWorkspaces` / `useSessions` slot props — it does not replace the full
+shipped sidebar browser (Add-workspace, archive/rename live on desktop).
+Desktop widths (>= 769px) are unaffected via a media query.
+
+It has **no host logic** — the `mobile` loader row exists only so the client
+module scan serves its bundle. Like dsh-github it is a bundle
+(`dsh.bundle.patch`) auto-installed by `entrypoint.sh` via an idempotent,
+version-marker-gated `install.mjs`; nothing ships in the prompt path. See
+[`plugins/dsh-mobile/README.md`](plugins/dsh-mobile/README.md).
 
 ## Runtime contract
 

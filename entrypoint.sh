@@ -19,6 +19,13 @@ if [ -e /opt/dsh-github/install.mjs ]; then
   node /opt/dsh-github/install.mjs
 fi
 
+# Auto-install the dsh-mobile skin plugin into the web profile (idempotent). It
+# registers the Gemini-style mobile top bar + drawer. Ignore when the image
+# predates the plugin.
+if [ -e /opt/dsh-mobile/install.mjs ]; then
+  node /opt/dsh-mobile/install.mjs
+fi
+
 exec dsh web \
   --host 127.0.0.1 \
   --port 3080 \
