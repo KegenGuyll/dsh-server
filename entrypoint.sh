@@ -19,6 +19,12 @@ if [ -e /opt/dsh-github/install.mjs ]; then
   node /opt/dsh-github/install.mjs
 fi
 
+# Auto-install the dsh-git-changes plugin (docked 'Git changes' panel) into the
+# web profile, same idempotent version-marker-gated flow.
+if [ -e /opt/dsh-git-changes/install.mjs ]; then
+  node /opt/dsh-git-changes/install.mjs
+fi
+
 exec dsh web \
   --host 127.0.0.1 \
   --port 3080 \

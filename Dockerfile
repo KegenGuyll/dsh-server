@@ -28,6 +28,16 @@ RUN cd /opt/dsh-github \
   && npm install --omit=dev --no-audit --no-fund --ignore-scripts --legacy-peer-deps \
   && rm -rf node_modules/.cache
 
+# The out-of-tree dsh-git-changes plugin (docked 'Git changes' panel that lists
+# every file changed on the current branch vs its base + idempotent installer)
+# is baked into the image; entrypoint.sh auto-installs it into the web profile on
+# first boot. It is host-only plus a client bundle, and runs git read commands
+# over the workspace, so git (installed above) is its only runtime requirement.
+COPY --chown=node:node plugins/dsh-git-changes /opt/dsh-git-changes
+RUN cd /opt/dsh-git-changes \
+  && npm install --omit=dev --no-audit --no-fund --ignore-scripts --legacy-peer-deps \
+  && rm -rf node_modules/.cache
+
 # /data     = $DSH_HOME (sessions, settings.yaml, credentials, web profile)
 # /workspaces = the agent's cwd (project checkouts)
 # Ownership is baked into the image so freshly created named volumes inherit

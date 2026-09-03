@@ -1,0 +1,13 @@
+# dsh-git-changes bundle patch, applied automatically when this package is listed
+# in dsh.profile.bundles (the dsh CLI adds it there on `dsh plugin add` because
+# this package declares dsh.bundle.patch).
+#
+#   - Insert the host/service row for the plugin itself. The loader resolves
+#     `dsh-git-changes` from the profile's node_modules. The `git-changes` row is
+#     what lets the client module system scan the package and serve its `./client`
+#     bundle (the scan keys off host Loader entries that declare `dsh.client`).
+#   - The host half registers the connection RPC handlers the browser half invokes
+#     to read the branch diff. Additive: nothing shipped is disabled.
+- insert:
+    - id: git-changes
+      name: 'dsh-git-changes'

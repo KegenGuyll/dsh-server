@@ -18,9 +18,11 @@ for the full design, the shared-network-namespace rationale, and the
 
 ```
 Dockerfile                     node:22-slim + npm i -g @deepseek-ai/dsh@<pinned> + pnpm
-entrypoint.sh                  node /opt/dsh-github/install.mjs (idempotent) then
+entrypoint.sh                  node /opt/dsh-github/install.mjs (idempotent), then
+                               node /opt/dsh-git-changes/install.mjs (idempotent), then
                                dsh web --host 127.0.0.1 --port 3080 --no-open --trusted-host "$DSH_TRUSTED_HOST"
 plugins/dsh-github/            out-of-tree GitHub workspace-import plugin (host + client bundle + installer)
+plugins/dsh-git-changes/       out-of-tree Git changes panel (host + client bundle + installer)
 .github/workflows/deploy.yml   calls personal-pipeline's reusable deploy-service.yml
 ```
 
@@ -59,6 +61,21 @@ and "Import from GitHub" clones and registers a repo. Because the plugin owns th
 two `single`-kind directory-flow holes, the harness directory-picker row is
 disabled by the installer (its client flow would otherwise collide) — local
 directory selection is provided entirely by the plugin.
+
+## dsh-git-changes plugin
+
+The image ships an out-of-tree plugin, `dsh-git-changes`, that adds a **"Changes"**
+button to the session header utilities and opens a **docked right-column panel**
+that lists every file changed on the currently checked-out branch of the session
+workspace (vs its base, `main`/`master`), plus uncommitted and untracked work. A
+filterable files list sits on the left; the selected file's diff on the right, with
+S/M/L width presets.
+
+All git data is produced **host-side** via `git` over the durable Connection RPC
+channel, so the browser never runs shell commands. See
+[`plugins/dsh-git-changes/README.md`](plugins/dsh-git-changes/README.md) for setup.
+Same bundle install flow (`dsh.bundle.patch` → `cordis.patch.yml` inserts the
+`git-changes` row) and an idempotent, version-marker-gated `install.mjs`.
 
 ## Runtime contract
 
