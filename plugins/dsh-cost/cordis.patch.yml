@@ -1,0 +1,14 @@
+# dsh-cost bundle patch, applied automatically when this package is listed in
+# dsh.profile.bundles (the dsh CLI adds it there on `dsh plugin add` because this
+# package declares dsh.bundle.patch).
+#
+#   - Insert the host/service row for the plugin itself. The loader resolves
+#     `dsh-cost` from the profile's node_modules. The `cost` row is what lets the
+#     client module system scan the package and serve its `./client` bundle (the
+#     scan keys off host Loader entries that declare `dsh.client`).
+#   - The host half registers the connection RPC handlers the browser half invokes
+#     to price the session (cost/session, cost/prices). Additive: nothing shipped
+#     is disabled.
+- insert:
+    - id: cost
+      name: 'dsh-cost'

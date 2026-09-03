@@ -19,6 +19,13 @@ if [ -e /opt/dsh-github/install.mjs ]; then
   node /opt/dsh-github/install.mjs
 fi
 
+# Auto-install the dsh-cost plugin (live session cost chip in the header
+# utilities strip, peak-aware pricing) into the web profile, same idempotent
+# version-marker-gated flow.
+if [ -e /opt/dsh-cost/install.mjs ]; then
+  node /opt/dsh-cost/install.mjs
+fi
+
 exec dsh web \
   --host 127.0.0.1 \
   --port 3080 \

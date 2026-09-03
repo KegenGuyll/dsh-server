@@ -28,6 +28,16 @@ RUN cd /opt/dsh-github \
   && npm install --omit=dev --no-audit --no-fund --ignore-scripts --legacy-peer-deps \
   && rm -rf node_modules/.cache
 
+# The out-of-tree dsh-cost plugin (live session cost chip in the header
+# utilities strip, peak-aware current-model pricing + idempotent installer) is
+# baked into the image; entrypoint.sh auto-installs it into the web profile on
+# first boot. Its host half imports @deepseek-ai/schemastery (a leaf; Cordis-free)
+# for the settings schema, resolved at its real path here.
+COPY --chown=node:node plugins/dsh-cost /opt/dsh-cost
+RUN cd /opt/dsh-cost \
+  && npm install --omit=dev --no-audit --no-fund --ignore-scripts --legacy-peer-deps \
+  && rm -rf node_modules/.cache
+
 # /data     = $DSH_HOME (sessions, settings.yaml, credentials, web profile)
 # /workspaces = the agent's cwd (project checkouts)
 # Ownership is baked into the image so freshly created named volumes inherit

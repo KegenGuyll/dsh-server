@@ -18,9 +18,11 @@ for the full design, the shared-network-namespace rationale, and the
 
 ```
 Dockerfile                     node:22-slim + npm i -g @deepseek-ai/dsh@<pinned> + pnpm
-entrypoint.sh                  node /opt/dsh-github/install.mjs (idempotent) then
+entrypoint.sh                  node /opt/dsh-github/install.mjs (idempotent), then
+                               node /opt/dsh-cost/install.mjs (idempotent), then
                                dsh web --host 127.0.0.1 --port 3080 --no-open --trusted-host "$DSH_TRUSTED_HOST"
 plugins/dsh-github/            out-of-tree GitHub workspace-import plugin (host + client bundle + installer)
+plugins/dsh-cost/              out-of-tree live session cost chip (host + client bundle + installer)
 .github/workflows/deploy.yml   calls personal-pipeline's reusable deploy-service.yml
 ```
 
@@ -59,6 +61,23 @@ and "Import from GitHub" clones and registers a repo. Because the plugin owns th
 two `single`-kind directory-flow holes, the harness directory-picker row is
 disabled by the installer (its client flow would otherwise collide) — local
 directory selection is provided entirely by the plugin.
+
+## dsh-cost plugin
+
+The image ships an out-of-tree plugin, `dsh-cost`, that shows a **live per-session
+dollar cost** in the session header's utilities strip, priced at the session's
+**current model** and honoring DeepSeek's **peak/off-peak** rate tiers. The chip
+glows red (pulsing 🔥) while the current time is inside a peak window.
+
+Cost is an **estimate** from the published tier rates — the DeepSeek API reports
+token usage, not dollars — so the plugin multiplies each request's token buckets
+by the configured per-1M rates. It is **current-session-only**. You configure the
+currency, precision, the UTC peak windows, the per-model rate table, and an
+optional pricing-page URL under **Settings → Plugins → Cost**. See
+[`plugins/dsh-cost/README.md`](plugins/dsh-cost/README.md) for setup and the
+full config reference. Same bundle install flow (`dsh.bundle.patch` →
+`cordis.patch.yml` inserts the `cost` row) and an idempotent,
+version-marker-gated `install.mjs`.
 
 ## Runtime contract
 
