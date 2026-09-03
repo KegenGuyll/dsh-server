@@ -57,10 +57,16 @@ hold the PAT, this is the one unavoidable host round trip.
 
 The handlers are registered on the generic Connection RPC channel
 (`ctx.connection.rpc` with `authority: 'trusted-host'`) and invoked from the
-browser with `rpc.call('/rpc', method, args)` — the durable transport that works
-over the tailnet, unlike the loopback-only settings RPCs. A generated Remote is
-an alternative but requires the harness typert/cordis codegen step, which is not
-runnable from this thin-wrapper repo; the generic RPC channel avoids that.
+browser with `rpc.call('/github', method, args)` — the durable transport that
+works over the tailnet, unlike the loopback-only settings RPCs. A generated
+Remote is an alternative but requires the harness typert/cordis codegen step,
+which is not runnable from this thin-wrapper repo; the generic RPC channel
+avoids that.
+
+The channel is namespaced to this plugin (`/github`): each `connection.rpc`
+channel registers a distinct physical prefix route, so two plugins must not
+share a channel name. dsh-notify owns `/notify`; a per-plugin channel is what
+prevents the `duplicate prefix route` plugin-load failure.
 
 Methods:
 - `github/list-user-repos` `{ page, perPage }` → `{ items, hasMore }`
@@ -106,7 +112,7 @@ and cannot be fully confirmed by static inspection:
 
 - peer-dependency resolution of the `@deepseek-ai/dsh-*` framework packages from
   the profile install;
-- the **client→host channel**: the generic Connection RPC (`rpc.call('/rpc', …)`)
+- the **client→host channel**: the generic Connection RPC (`rpc.call('/github', …)`)
   must be reachable from the browser (authority `trusted-host`); confirm on a
   live server, since remote browsers keep the settings plane loopback-only;
 - the directory-flow owner-props contract (the chooser receives `open`/`busy`/

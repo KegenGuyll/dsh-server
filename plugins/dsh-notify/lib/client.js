@@ -6,7 +6,7 @@
  *
  * All ntfy delivery runs on the host (the access token never crosses the wire);
  * the client calls the host through the generic Connection RPC channel
- * (`ctx.connection.rpc.call('/rpc', method, args)`), whose handlers live in
+ * (`ctx.connection.rpc.call('/notify', method, args)`), whose handlers live in
  * lib/index.js. It reads the `notify` settings namespace for the scalar config
  * fields (edits are batched behind a Save button, matching dsh-github).
  */
@@ -55,7 +55,7 @@ window.__ModuleLoader__.load({
 			if (!rpc || typeof rpc.call !== "function") {
 				return Promise.reject(new Error("Notify host channel is unavailable"));
 			}
-			return rpc.call("/rpc", method, args).then(function (result) {
+			return rpc.call("/notify", method, args).then(function (result) {
 				if (result && result.ok) return result.value;
 				var message = (result && result.error && result.error.message) || "Notify request failed";
 				throw new Error(message);

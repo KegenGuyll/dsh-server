@@ -6,8 +6,9 @@
  *
  * All GitHub work runs on the host (the PAT never crosses the wire): the client
  * calls the host through the generic Connection RPC channel
- * (`ctx.connection.rpc.call('/rpc', method, args)`), with the host handlers
- * declared in index.js.
+ * (`ctx.connection.rpc.call('/github', method, args)`), with the host handlers
+ * declared in index.js. The channel is namespaced to this plugin so it never
+ * collides with another plugin's RPC channel (dsh-notify owns `/notify`).
  */
 window.__ModuleLoader__.load({
 	id: "dsh-github",
@@ -112,7 +113,7 @@ window.__ModuleLoader__.load({
 			if (!rpc || typeof rpc.call !== "function") {
 				return Promise.reject(new Error("GitHub host channel is unavailable"));
 			}
-			return rpc.call("/rpc", method, args).then((result) => {
+			return rpc.call("/github", method, args).then((result) => {
 				if (result && result.ok) return result.value;
 				const message = (result && result.error && result.error.message) || "GitHub request failed";
 				throw new Error(message);
