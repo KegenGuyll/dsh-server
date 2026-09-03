@@ -101,10 +101,12 @@ function apply(ctx, config) {
 
 	/**
 	 * Resolve the current config + token and send one ntfy push, applying the
-	 * cooldown and master switches. Never throws into a caller.
+	 * cooldown and master switches. `title`/`priority`/`tags` (when provided)
+	 * override the kind-based defaults so a general tool can send a bespoke
+	 * notification while still sharing one send path. Never throws into a caller.
 	 * @returns {Promise<{ ok: boolean, skipped?: boolean, error?: { code: string, message: string } }>}
 	 */
-	async function notify({ kind, sessionId, message }) {
+	async function notify({ kind, sessionId, message, title, priority, tags }) {
 		const cfg = scope.get();
 		if (!cfg.enabled) return { ok: false, error: { code: "disabled", message: "notify is disabled" } };
 		if (!cfg.topicUrl) return { ok: false, error: { code: "no-topic", message: "ntfy topic is not configured" } };
@@ -128,15 +130,18 @@ function apply(ctx, config) {
 		}
 
 		const meta = kindMeta(kind, cfg.titlePrefix || "DSH");
-		const body = message || meta.title;
+		const sendTitle = (title && String(title).trim().length > 0) ? String(title).trim() : meta.title;
+		const sendPriority = (priority && String(priority).trim().length > 0) ? String(priority).trim() : meta.priority;
+		const sendTags = (tags && String(tags).trim().length > 0) ? String(tags).trim() : meta.tags;
+		const body = message || sendTitle;
 		try {
 			await sendNtfy({
 				topicUrl: cfg.topicUrl,
 				token,
-				title: meta.title,
+				title: sendTitle,
 				message: body,
-				priority: meta.priority,
-				tags: meta.tags
+				priority: sendPriority,
+				tags: sendTags
 			});
 			lastSentAt.set(key, now);
 			return { ok: true };
@@ -248,6 +253,78 @@ function apply(ctx, config) {
 					return args.kind === "input"
 						? "Sent a push notification to the user: they need your input. Proceed when they respond."
 						: "Sent a push notification to the user.";
+				}
+				return `Could not send the notification: ${result.error?.message ?? "unknown error"}`;
+			}
+		});
+	}
+
+	// General-purpose agent-facing notification tool: the agent can actively push
+	// a bespoke notification (custom title / message / priority / tag). Where the
+	// user must ACT (approve, answer, review), prefer `ping_user` with kind=input
+	// (it also marks the push urgent). This tool is for proactive, informational
+	// sends and still validates + reports failures so the agent knows whether the
+	// push actually went out.
+	const toolsSend = ctx.get("tools");
+	if (toolsSend && typeof toolsSend.register === "function") {
+		toolsSend.register({
+			name: "send_notification",
+			description:
+				"Send a push notification to the user's phone (via ntfy). Use this to proactively let the user know something they can't see — " +
+				"an external status change, a long operation finishing, an error worth their attention, or a result they asked to be notified about. " +
+				"Provide a short specific `message`; optionally a custom `title`, `priority`, and emoji `tags`. " +
+				"If the user must act (approve/answer/review), prefer `ping_user` with kind=input, which sends an urgent push.",
+			parameters: {
+				type: "object",
+				properties: {
+					message: {
+						type: "string",
+						description: "The notification body text. Short and specific (e.g. 'Backup complete — 12.4 GB written')."
+					},
+					title: {
+						type: "string",
+						description: "Optional short banner title. Defaults to '<prefix> — Notification'."
+					},
+					priority: {
+						type: "string",
+						enum: ["min", "low", "default", "high", "urgent"],
+						description: "Optional ntfy priority (default 'default'). Use 'urgent' to ensure delivery / override quiet hours."
+					},
+					tags: {
+						type: "string",
+						description: "Optional emoji tag(s), comma-separated (e.g. '✅', '🔥', or '🚨,🔥')."
+					}
+				},
+				required: ["message"]
+			},
+			output: {
+				schema: { type: "string" },
+				render(_args, value) {
+					return [{ type: "text", text: String(value) }];
+				}
+			},
+			async execute(args) {
+				const agents = ctx.get("agents");
+				let agent;
+				try {
+					agent = agents?.currentInitiator?.();
+				} catch (e) { /* ignore */ }
+				const sid = sessionIdOf(agent);
+				const msg = String(args.message ?? "").trim();
+				if (msg.length === 0) return "send_notification requires a non-empty `message`.";
+				const result = await notify({
+					kind: "notify",
+					sessionId: sid,
+					message: msg,
+					title: args.title,
+					priority: args.priority,
+					tags: args.tags
+				});
+				if (result.ok) {
+					if (result.skipped) {
+						return "Notification skipped: a notification was sent to this session too recently (cooldown). Try again in a moment.";
+					}
+					return `Sent a push notification to the user${(args.title && String(args.title).trim()) ? ` — ${String(args.title).trim()}` : ""}.`;
 				}
 				return `Could not send the notification: ${result.error?.message ?? "unknown error"}`;
 			}

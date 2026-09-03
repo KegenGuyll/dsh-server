@@ -49,17 +49,38 @@ install.mjs       idempotent auto-installer run by entrypoint.sh
 > blocked on a human (right before a question, or when it knows an approval is
 > coming). Plan review is detected automatically from `planMode`.
 
-## The `ping_user` tool
+## The agent's notification tools
 
-The agent can ping you on demand:
+The agent has two tools to actively notify you:
+
+### `ping_user`
+
+For when the agent needs you to act, or a long task is done:
 
 ```
 ping_user(kind: "input" | "done" | "info", message?: string)
 ```
 
-- `input` — you need to decide/approve/answer/review something.
+- `input` — you need to decide/approve/answer/review something (sent urgent).
 - `done` — a long task finished.
 - `info`  — a generic notice.
+
+### `send_notification`
+
+For proactive, informational sends with full control over the banner:
+
+```
+send_notification(message: string, title?: string, priority?: "min"|"low"|"default"|"high"|"urgent", tags?: string)
+```
+
+- `message` — required body text (short and specific).
+- `title` — optional banner title (defaults to `<prefix> — Notification`).
+- `priority` — optional ntfy priority (default `default`); use `urgent` to ensure delivery.
+- `tags` — optional emoji tag(s), comma-separated (e.g. `✅`, `🔥`).
+
+Both tools validate the config and report back whether the push actually went out
+(`sent` / `skipped` / an error), so the agent doesn't assume success when notify is
+disabled, the topic is unconfigured, or a send fails.
 
 ## Config (`notify` settings namespace)
 
