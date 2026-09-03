@@ -67,6 +67,17 @@ RUN cd /opt/dsh-stt \
   && npm install --omit=dev --no-audit --no-fund --ignore-scripts --legacy-peer-deps \
   && rm -rf node_modules/.cache
 
+# The out-of-tree dsh-notify plugin (ntfy push on task-complete / needs-input +
+# idempotent installer) is baked into the image; entrypoint.sh auto-installs it
+# into the web profile on first boot. Its host half imports @deepseek-ai/schemastery
+# (a leaf; Cordis-free) for the settings schema, resolved at its real path here.
+# It deliberately does NOT import @deepseek-ai/dsh-tools or other harness peers,
+# as those do not resolve from an out-of-tree plugin's real path.
+COPY --chown=node:node plugins/dsh-notify /opt/dsh-notify
+RUN cd /opt/dsh-notify \
+  && npm install --omit=dev --no-audit --no-fund --ignore-scripts --legacy-peer-deps \
+  && rm -rf node_modules/.cache
+
 # /data     = $DSH_HOME (sessions, settings.yaml, credentials, web profile)
 # /workspaces = the agent's cwd (project checkouts)
 # Ownership is baked into the image so freshly created named volumes inherit

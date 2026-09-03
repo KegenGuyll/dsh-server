@@ -32,6 +32,12 @@ if [ -e /opt/dsh-stt/install.mjs ]; then
   node /opt/dsh-stt/install.mjs
 fi
 
+# Auto-install the dsh-notify plugin (ntfy push on task-complete / needs-input)
+# into the web profile, same idempotent version-marker-gated flow.
+if [ -e /opt/dsh-notify/install.mjs ]; then
+  node /opt/dsh-notify/install.mjs
+fi
+
 # Configure git to use gh as the credential helper, so the agent can git-push /
 # open PRs using the token persisted on the persistent /data/gh volume
 # (GH_CONFIG_DIR). Idempotent and harmless when gh isn't authenticated yet.

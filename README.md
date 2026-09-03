@@ -27,10 +27,12 @@ Dockerfile                     node:22-slim + npm i -g @deepseek-ai/dsh@<pinned>
 entrypoint.sh                  node /opt/dsh-github/install.mjs (idempotent), then
                                node /opt/dsh-mobile/install.mjs (idempotent), then
                                node /opt/dsh-stt/install.mjs (idempotent), then
+                               node /opt/dsh-notify/install.mjs (idempotent), then
                                dsh web --host 127.0.0.1 --port 3080 --no-open --trusted-host "$DSH_TRUSTED_HOST"
 plugins/dsh-github/            out-of-tree GitHub workspace-import plugin (host + client bundle + installer)
 plugins/dsh-mobile/            Gemini-style mobile skin (client bundle + installer; hides the menu, adds New Session)
 plugins/dsh-stt/               out-of-tree speech-to-text composer mic plugin (browser-only + installer)
+plugins/dsh-notify/            out-of-tree ntfy push on task-complete / needs-input plugin (host + client bundle + installer)
 .github/workflows/deploy.yml   calls personal-pipeline's reusable deploy-service.yml
 ```
 
@@ -119,6 +121,29 @@ row (right of the model selector, before the send button).
 Same bundle install flow as `dsh-github`: `dsh.bundle.patch` →
 `cordis.patch.yml` inserts the `stt` row, and `entrypoint.sh` runs its
 idempotent, version-marker-gated `install.mjs`.
+
+## dsh-notify plugin
+
+The image ships an out-of-tree plugin, `dsh-notify`, that pushes **ntfy**
+notifications to your phone when the agent finishes a task or needs your input.
+Because you reach DSH from an iPhone via a home-screen shortcut (and the page
+may not be in the foreground), delivery goes through an ntfy topic rather than a
+browser banner:
+
+- **Task complete** — `agent/status` → `idle`, after a run ≥ `minDoneSeconds`,
+  and not while a DSH page is visibly in the foreground.
+- **Plan needs review** — `agent/status` → `idle` while `planMode` is pending.
+- **Needs your input** — the agent calls the **`ping_user`** tool
+  (`kind: input`) when it is blocked on a human (an approval, a clarifying
+  question, handing back a plan).
+
+You configure the topic (and optional access token) under **Settings → Plugins →
+Notify** and hit **Send test**; the token is written to the credentials domain
+and never leaves the host. See
+[`plugins/dsh-notify/README.md`](plugins/dsh-notify/README.md) for setup and the
+config reference. Same bundle install flow (`dsh.bundle.patch` →
+`cordis.patch.yml` inserts the `notify` row) and an idempotent,
+version-marker-gated `install.mjs`.
 
 ## Runtime contract
 
