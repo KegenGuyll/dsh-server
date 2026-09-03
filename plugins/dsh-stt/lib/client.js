@@ -18,6 +18,7 @@ window.__ModuleLoader__.load({
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 
 		var React = require("react");
+		var primitives = require("@deepseek-ai/dsh-client-ui-primitives");
 
 		/* Mic button styles, keyed to the harness theme tokens so the button
 		 * matches the rest of the composer tool row (idle = secondary label,
@@ -40,7 +41,8 @@ window.__ModuleLoader__.load({
 		}
 		injectStyles();
 
-		/** The mic glyph (Feather-style), colored by the current button color. */
+		/** The mic glyph (Feather-style), colored by the current button color. The
+		 * primitives package exposes no microphone glyph, so the SVG stays inline. */
 		function MicIcon() {
 			return React.createElement("svg", {
 				viewBox: "0 0 24 24",
@@ -205,19 +207,26 @@ window.__ModuleLoader__.load({
 			};
 
 			const supported = typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-			const title = notice || (!supported
+			const label = notice || (!supported
 				? "Speech input is not supported in this browser"
 				: active ? "Listening — click to stop" : "Voice input");
 
-			return React.createElement("button", {
+			/* The mic control follows the composer's tool-row convention: a plain
+			 * icon button (matching the shipped `.add`/`.primary` controls) wrapped
+			 * in the `Tooltip` primitive so its helper text matches the rest of the
+			 * row instead of a native `title`. */
+			return React.createElement(primitives.Tooltip, {
+				label,
+				side: "top",
+				delayMs: 500
+			}, React.createElement("button", {
 				type: "button",
 				className: "stt-mic-btn" + (active ? " stt-mic-active" : ""),
 				onClick,
 				disabled: !supported || !!notice,
-				title,
 				"aria-label": active ? "Stop voice input" : "Start voice input",
 				"aria-pressed": active
-			}, React.createElement(MicIcon, null));
+			}, React.createElement(MicIcon, null)));
 		}
 
 		/** Required client services (Cordis fibre inject). */
