@@ -175,13 +175,6 @@ async function localCreate(path, name) {
 }
 
 /**
- * Register the client→host RPC handlers on the generic Connection RPC channel
- * (`ctx.connection.rpc`), the durable transport that works over the tailnet
- * with `authority: 'trusted-host'` (unlike the loopback-only settings RPCs that
- * 403 on a remote browser). `harness.handle`/`host.call` is the dynamic-Cordis
- * mechanism and is not available to a durable plugin, so it is not used here.
- */
-/**
  * Register the client→host handlers on the generic Connection RPC channel
  * (`ctx.connection.rpc`), the durable transport that works over the tailnet
  * with `authority: 'trusted-host'` (unlike the loopback-only settings RPCs that

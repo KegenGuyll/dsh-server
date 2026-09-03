@@ -17,66 +17,83 @@ window.__ModuleLoader__.load({
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 
 		var React = require("react");
+		var primitives = require("@deepseek-ai/dsh-client-ui-primitives");
 
-		/* Styles for the workspace-add chooser / import modal / settings card.
-		 * Sized and colored with the harness theme tokens (--dsw-alias-*) so the
-		 * surfaces match the in-app "View options" menu and dialogs. */
+		/* Styles for the import/local dialogs and the settings card.
+		 *
+		 * The dialogs use the native `Modal`/`Menu`/`Button` primitives, so their
+		 * surfaces, backdrops, focus handling, and buttons come from the harness
+		 * theme; these rules only size the dialog and style the repo/dir rows the
+		 * primitives don't provide. The settings card chrome and field rules mirror
+		 * the shipped `PluginCard` / `fields` CSS from
+		 * @deepseek-ai/dsh-client-ui-settings-plugins — the card sits in the same
+		 * `<ul>` as the Shell / Agent loop / Web search cards, which it must match.
+		 */
 		var STYLES = [
-			// Palette, keyed by the detected theme on the overlay (.dsh-github-overlay).
-			// The light/dark override is applied via the data-dsh-theme attribute the
-			// chooser sets, matching the harness theme selection instead of hardcoding.
-			".dsh-github-overlay[data-dsh-theme=light]{--dgh-bg:#ffffff;--dgh-text:#1b1b1f;--dgh-dim:#6b6b73;--dgh-border:rgba(0,0,0,.12);--dgh-hover:rgba(0,0,0,.06);--dgh-accent:#2563eb;--dgh-field:#f4f4f6;--dgh-err:#dc2626;}",
-			".dsh-github-overlay[data-dsh-theme=dark]{--dgh-bg:#242429;--dgh-text:#e6e6e8;--dgh-dim:#8f8f98;--dgh-border:rgba(255,255,255,.09);--dgh-hover:rgba(255,255,255,.07);--dgh-accent:#3b82f6;--dgh-field:#1c1c21;--dgh-err:#ff6b6b;}",
-			".dsh-github-overlay{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;}",
-			".dsh-github-dialog{background:var(--dgh-bg,#242429);color:var(--dgh-text,#e6e6e8);border:1px solid var(--dgh-border,rgba(255,255,255,.09));border-radius:12px;box-shadow:0 16px 44px rgba(0,0,0,.45);min-width:340px;max-width:min(560px,92vw);min-height:240px;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;}",
-			".dsh-github-card{background:#242429;color:#e6e6e8;border:1px solid rgba(255,255,255,.09);border-radius:10px;min-width:224px;padding:6px;display:flex;flex-direction:column;gap:2px;font:inherit;}",
-			".dsh-github-chooser,.dsh-github-modal,.dsh-github-local{display:flex;flex-direction:column;gap:2px;padding:6px;min-height:0;flex:1;}",
-			".dsh-github-chooser-title,.dsh-github-modal-head,.dsh-github-card-status{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--dgh-dim,#8f8f98);padding:8px 10px 6px;}",
-			".dsh-github-choice,.dsh-github-dir{display:flex;align-items:center;gap:8px;width:100%;padding:10px 12px;border:0;border-radius:7px;background:transparent;color:var(--dgh-text,#e6e6e8);cursor:pointer;text-align:left;font:inherit;font-size:13px;}",
-			".dsh-github-choice:hover,.dsh-github-dir:hover,.dsh-github-row:hover{background:var(--dgh-hover,rgba(255,255,255,.07));}",
-			".dsh-github-choice:disabled,.dsh-github-dir:disabled{opacity:.5;cursor:default;}",
-			".dsh-github-cancel{color:var(--dgh-dim,#9a9aa2);}",
-			".dsh-github-modal-head{display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid var(--dgh-border,rgba(255,255,255,.08));padding-bottom:8px;margin-bottom:6px;}",
-			".dsh-github-search{flex:1;min-width:0;padding:7px 9px;border:1px solid var(--dgh-border,rgba(255,255,255,.14));border-radius:7px;background:var(--dgh-field,#1c1c21);color:var(--dgh-text,#e6e6e8);font:inherit;font-size:12px;}",
+			// Dialog surface (sized only; the Modal primitive supplies the rest).
+			".dsh-github-dialog{gap:0;padding:0;width:min(560px,100%);height:min(520px,100dvh - 32px);}",
+			".dsh-github-modal,.dsh-github-local{display:flex;flex-direction:column;gap:2px;padding:6px;min-height:0;flex:1;}",
+			".dsh-github-modal-head{display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid var(--dsw-alias-border-l2);padding-bottom:8px;margin-bottom:6px;}",
+			".dsh-github-search{flex:1;min-width:0;padding:7px 9px;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;}",
 			".dsh-github-list{height:280px;overflow:auto;display:flex;flex-direction:column;gap:2px;padding:4px;}",
 			".dsh-github-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border-radius:7px;}",
+			".dsh-github-row:hover{background:var(--dsw-alias-bg-module-platform);}",
 			".dsh-github-row-main{display:flex;flex-direction:column;gap:2px;min-width:0;}",
-			".dsh-github-row-title{font-weight:600;font-size:13px;color:var(--dgh-text,#e6e6e8);}",
-			".dsh-github-row-desc{color:var(--dgh-dim,#8f8f98);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}",
-			".dsh-github-row-meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--dgh-dim,#8f8f98);}",
-			".dsh-github-badge{background:var(--dgh-hover,rgba(255,255,255,.08));padding:1px 6px;border-radius:999px;color:var(--dgh-dim,#b8b8be);}",
-			".dsh-github-private{color:var(--dgh-dim,#8f8f98);}",
-			".dsh-github-empty,.dsh-github-loading,.dsh-github-error{color:var(--dgh-dim,#9a9aa2);font-size:12px;padding:12px;text-align:center;}",
-			".dsh-github-error{color:var(--dgh-err,#ff6b6b);}",
-			".dsh-github-import,.dsh-github-save{background:var(--dgh-accent,#3b82f6);color:#fff;border:0;border-radius:7px;padding:7px 12px;font:inherit;font-size:12px;cursor:pointer;}",
-			".dsh-github-import:disabled,.dsh-github-save:disabled{opacity:.6;cursor:default;}",
-			".dsh-github-load-more,.dsh-github-back,.dsh-github-close,.dsh-github-mkdir,.dsh-github-up,.dsh-github-clear,.dsh-github-cancel{background:transparent;border:1px solid var(--dgh-border,rgba(255,255,255,.14));border-radius:7px;padding:7px 12px;color:var(--dgh-text,#e6e6e8);font:inherit;font-size:12px;cursor:pointer;}",
-			".dsh-github-load-more{display:block;margin:6px auto;}",
+			".dsh-github-row-title{font-weight:600;font-size:13px;color:var(--dsw-alias-label-primary);}",
+			".dsh-github-row-desc{color:var(--dsw-alias-label-tertiary);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}",
+			".dsh-github-row-meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--dsw-alias-label-tertiary);}",
+			".dsh-github-badge{background:var(--dsw-alias-bg-module-platform);padding:1px 6px;border-radius:999px;color:var(--dsw-alias-label-secondary);}",
+			".dsh-github-private{color:var(--dsw-alias-label-tertiary);}",
+			".dsh-github-empty,.dsh-github-loading,.dsh-github-error{color:var(--dsw-alias-label-secondary);font-size:12px;padding:12px;text-align:center;}",
+			".dsh-github-error{color:var(--dsw-alias-state-error-primary);}",
+			".dsh-github-dir{display:flex;align-items:center;gap:8px;width:100%;padding:10px 12px;border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer;text-align:left;font:inherit;font-size:13px;}",
+			".dsh-github-dir:hover{background:var(--dsw-alias-bg-module-platform);}",
+			".dsh-github-dir:disabled{opacity:.5;cursor:default;}",
 			".dsh-github-modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:8px 6px 4px;}",
 			".dsh-github-local-controls{display:flex;gap:8px;padding:8px 10px;align-items:center;}",
-			".dsh-github-new-name{flex:1;padding:7px 9px;border:1px solid var(--dgh-border,rgba(255,255,255,.14));border-radius:7px;background:var(--dgh-field,#1c1c21);color:var(--dgh-text,#e6e6e8);font:inherit;font-size:12px;}",
-			".dsh-github-path{font-size:11px;font-weight:400;color:var(--dgh-dim,#8f8f98);}",
-			".dsh-github-field{display:flex;flex-direction:column;gap:4px;padding:6px 10px;font-size:12px;color:var(--dgh-dim,#8f8f98);}",
-			".dsh-github-field input[type=text],.dsh-github-field input[type=password],.dsh-github-field input:not([type=checkbox]){padding:6px 8px;border:1px solid var(--dgh-border,rgba(255,255,255,.14));border-radius:7px;background:var(--dgh-field,#1c1c21);color:var(--dgh-text,#e6e6e8);font:inherit;}",
-			".dsh-github-card-status{display:flex;align-items:center;gap:6px;font-weight:600;color:#e6e6e8;}",
-			".dsh-github-card-detail{font-weight:400;text-transform:none;}",
-			".dsh-github-card-actions{display:flex;gap:8px;padding:8px 10px 4px;}"
+			".dsh-github-new-name{flex:1;padding:7px 9px;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;}",
+			".dsh-github-path{font-size:11px;font-weight:400;color:var(--dsw-alias-label-tertiary);}",
+			// Settings card chrome — matches the shipped PluginCard.
+			".dsh-github-card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:12px;list-style:none;transition:border-color .16s,background .16s;}",
+			".dsh-github-card:hover{border-color:var(--dsw-alias-label-dimmed);}",
+			".dsh-github-cardOpen{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-label-dimmed);}",
+			".dsh-github-card-head{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex;}",
+			".dsh-github-card-head:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px;}",
+			".dsh-github-card-headText{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex;}",
+			".dsh-github-card-name{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;line-height:1.4;}",
+			".dsh-github-card-description{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5;}",
+			".dsh-github-card-chevron{color:var(--dsw-alias-label-tertiary);flex:none;transition:transform .16s;}",
+			".dsh-github-card-chevronOpen{transform:rotate(180deg);}",
+			".dsh-github-card-body{border-top:1px solid var(--dsw-alias-border-l2);margin:0 16px;padding-bottom:8px;}",
+			".dsh-github-card-readOnly{color:var(--dsw-alias-label-tertiary);margin:12px 0 0;font-size:12px;line-height:1.5;}",
+			".dsh-github-card-pending{white-space:nowrap;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);border-radius:999px;flex:none;padding:1px 8px;font-size:11px;font-weight:500;line-height:17px;}",
+			".dsh-github-card-footer{border-top:1px solid var(--dsw-alias-border-l2);justify-content:flex-end;align-items:center;gap:8px;padding:12px 0 4px;display:flex;}",
+			".dsh-github-card-failed{min-width:0;color:var(--dsw-alias-label-error);flex:1;margin:0;font-size:12px;line-height:1.5;}",
+			".dsh-github-card-discard,.dsh-github-card-save{appearance:none;font:inherit;cursor:pointer;border:1px solid #0000;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5;}",
+			".dsh-github-card-discard{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:0 0;}",
+			".dsh-github-card-discard:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);}",
+			".dsh-github-card-save{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3);}",
+			".dsh-github-card-discard:disabled,.dsh-github-card-save:disabled{opacity:.4;cursor:default;}",
+			".dsh-github-card-discard:focus-visible,.dsh-github-card-save:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px;}",
+			// Card fields (ValueField / SecretField chrome).
+			".dsh-github-field{flex-direction:column;gap:6px;padding:12px 0;display:flex;}",
+			".dsh-github-field+.dsh-github-field{border-top:1px solid var(--dsw-alias-border-l2);}",
+			".dsh-github-field-head{align-items:center;gap:8px;display:flex;}",
+			".dsh-github-field-control{align-items:center;gap:8px;display:flex;color:var(--dsw-alias-label-primary);font-size:13px;}",
+			".dsh-github-field-label{min-width:0;color:var(--dsw-alias-label-primary);flex:1;font-size:13px;font-weight:500;line-height:1.5;}",
+			".dsh-github-field-badges{align-items:center;gap:8px;display:inline-flex;}",
+			".dsh-github-field-badge{white-space:nowrap;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);border-radius:999px;padding:1px 8px;font-size:11px;font-weight:500;line-height:17px;}",
+			".dsh-github-field-badgeMuted{white-space:nowrap;color:var(--dsw-alias-label-tertiary);border-radius:999px;padding:1px 8px;font-size:11px;line-height:17px;}",
+			".dsh-github-field-reset{font:inherit;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border:none;padding:0;font-size:12px;line-height:1.5;}",
+			".dsh-github-field-reset:hover:not(:disabled){color:var(--dsw-alias-label-primary);}",
+			".dsh-github-field-reset:disabled{cursor:default;}",
+			".dsh-github-field-input{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);height:34px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:0 12px;font-size:13px;line-height:1.5;}",
+			".dsh-github-field-input:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none;}",
+			".dsh-github-field-input:disabled{color:var(--dsw-alias-label-tertiary);cursor:default;}",
+			".dsh-github-field-input[type=checkbox]{height:auto;width:auto;padding:0;}",
+			".dsh-github-field-hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5;}"
 		].join("\n");
 
-		/** Detect the harness theme (data-theme attr / .dark class / prefers-color-scheme). */
-		function resolveDark() {
-			try {
-				var el = document.documentElement;
-				if (el) {
-					var t = el.getAttribute("data-theme");
-					if (t === "dark") return true;
-					if (t === "light") return false;
-					if (el.classList.contains("dark")) return true;
-				}
-			} catch (e) {}
-			try { if (typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches) return true; } catch (e) {}
-			return false;
-		}
 		function injectStyles() {
 			if (typeof document === "undefined" || document.getElementById("dsh-github-style")) return;
 			var el = document.createElement("style");
@@ -136,7 +153,7 @@ window.__ModuleLoader__.load({
 
 			const q = query.trim().toLowerCase();
 			const filtered = q
-				? items.filter((it) => it.fullName.toLowerCase().includes(q) || it.description.toLowerCase().includes(q))
+				? items.filter((it) => it.fullName.toLowerCase().includes(q) || (it.description || "").toLowerCase().includes(q))
 				: items;
 
 			const importRepoRow = (repo) => {
@@ -148,6 +165,23 @@ window.__ModuleLoader__.load({
 					.then(() => setImporting(""));
 			};
 
+			const rows = filtered.map((it) => {
+				const meta = React.createElement("div", { className: "dsh-github-row-meta" },
+					it.language ? React.createElement("span", { className: "dsh-github-badge" }, it.language) : null,
+					React.createElement("span", { className: "dsh-github-badge" }, String(it.stars) + " stars"),
+					it.private ? React.createElement("span", { className: "dsh-github-badge dsh-github-private" }, "private") : null);
+				const main = React.createElement("div", { className: "dsh-github-row-main" },
+					React.createElement("div", { className: "dsh-github-row-title" }, it.fullName),
+					it.description ? React.createElement("div", { className: "dsh-github-row-desc" }, it.description) : null,
+					meta);
+				const action = React.createElement(primitives.Button, {
+					variant: "primary",
+					disabled: importing !== "",
+					onClick: () => importRepoRow(it)
+				}, importing === it.fullName ? "Importing…" : "Import");
+				return React.createElement("div", { className: "dsh-github-row", key: it.fullName }, main, action);
+			});
+
 			return React.createElement("div", { className: "dsh-github-modal" },
 				React.createElement("div", { className: "dsh-github-modal-head" },
 					React.createElement("span", null, "Import from GitHub"),
@@ -158,40 +192,19 @@ window.__ModuleLoader__.load({
 						value: query,
 						onChange: (e) => setQuery(e.target.value)
 					})),
-				error
-					? React.createElement("div", { className: "dsh-github-error" }, error)
-					: null,
+				error ? React.createElement("div", { className: "dsh-github-error" }, error) : null,
 				React.createElement("div", { className: "dsh-github-list" },
 					loading && items.length === 0
 						? React.createElement("div", { className: "dsh-github-loading" }, "Loading repositories…")
 						: filtered.length === 0 && !loading
 							? React.createElement("div", { className: "dsh-github-empty" }, "No repositories")
-							: filtered.map((it) => React.createElement("div", { className: "dsh-github-row", key: it.fullName },
-							React.createElement("div", { className: "dsh-github-row-main" },
-								React.createElement("div", { className: "dsh-github-row-title" }, it.fullName),
-								it.description
-									? React.createElement("div", { className: "dsh-github-row-desc" }, it.description)
-									: null,
-								React.createElement("div", { className: "dsh-github-row-meta" },
-									it.language ? React.createElement("span", { className: "dsh-github-badge" }, it.language) : null,
-									React.createElement("span", { className: "dsh-github-badge" }, String(it.stars) + " stars"),
-									it.private ? React.createElement("span", { className: "dsh-github-badge dsh-github-private" }, "private") : null
-								)),
-							React.createElement("button", {
-								className: "dsh-github-import",
-								disabled: importing !== "",
-								onClick: () => importRepoRow(it)
-							}, importing === it.fullName ? "Importing…" : "Import")))),
+							: rows),
 				hasMore
-					? React.createElement("button", {
-						className: "dsh-github-load-more",
-						disabled: loading,
-						onClick: () => load(page + 1, false)
-					}, loading ? "Loading…" : "Load more")
+					? React.createElement(primitives.Button, { variant: "outline", disabled: loading, onClick: () => load(page + 1, false) }, loading ? "Loading…" : "Load more")
 					: null,
 				React.createElement("div", { className: "dsh-github-modal-foot" },
-					React.createElement("button", { className: "dsh-github-back", onClick: onBack }, "Back"),
-					React.createElement("button", { className: "dsh-github-close", onClick: onCancel }, "Close")));
+					React.createElement(primitives.Button, { variant: "outline", onClick: onBack }, "Back"),
+					React.createElement(primitives.Button, { variant: "outline", onClick: onCancel }, "Close")));
 		}
 
 		/**
@@ -226,145 +239,376 @@ window.__ModuleLoader__.load({
 					.then(() => setLoading(false));
 			};
 
+			const dirRows = entries.map((name) => React.createElement("button", {
+				className: "dsh-github-dir",
+				key: name,
+				disabled: loading,
+				onClick: () => load(path.replace(/\/$/, "") + "/" + name)
+			}, name));
+
 			return React.createElement("div", { className: "dsh-github-local" },
 				React.createElement("div", { className: "dsh-github-modal-head" },
 					React.createElement("span", null, "Add local workspace"),
 					React.createElement("span", { className: "dsh-github-path" }, path || "…")),
 				error ? React.createElement("div", { className: "dsh-github-error" }, error) : null,
 				React.createElement("div", { className: "dsh-github-local-controls" },
-					React.createElement("button", { className: "dsh-github-up", disabled: !hasParent || loading, onClick: () => load(path.replace(/\/[^/]*\/?$/, "") || "/") }, "Up"),
+					React.createElement(primitives.Button, { variant: "outline", disabled: !hasParent || loading, onClick: () => load(path.replace(/\/[^/]*\/?$/, "") || "/") }, "Up"),
 					React.createElement("input", { className: "dsh-github-new-name", placeholder: "New folder name", value: newName, onChange: (e) => setNewName(e.target.value) }),
-					React.createElement("button", { className: "dsh-github-mkdir", disabled: !newName.trim() || loading, onClick: makeDir }, "Create")),
+					React.createElement(primitives.Button, { variant: "outline", disabled: !newName.trim() || loading, onClick: makeDir }, "Create")),
 				React.createElement("div", { className: "dsh-github-list dsh-github-list-local" },
 					loading && path === ""
 						? React.createElement("div", { className: "dsh-github-loading" }, "Loading…")
 						: (entries.length === 0 && !loading)
 							? React.createElement("div", { className: "dsh-github-empty" }, "No subfolders")
-							: entries.map((name) => React.createElement("button", {
-							className: "dsh-github-dir",
-							key: name,
-							disabled: loading,
-							onClick: () => load(path.replace(/\/$/, "") + "/" + name)
-						}, name))),
+							: dirRows),
 				React.createElement("div", { className: "dsh-github-modal-foot" },
-					React.createElement("button", { className: "dsh-github-back", disabled: loading, onClick: onCancel }, "Cancel"),
-					React.createElement("button", { className: "dsh-github-import", disabled: loading, onClick: () => onPicked(path) }, "Use this folder")));
+					React.createElement(primitives.Button, { variant: "outline", disabled: loading, onClick: onCancel }, "Cancel"),
+					React.createElement(primitives.Button, { variant: "primary", disabled: loading, onClick: () => onPicked(path) }, "Use this folder")));
 		}
 
 		/**
-		 * The workspace-add chooser occupant. Renders a small menu when the owner
-		 * opens the flow (open=true): "Add local workspace" opens the compact
-		 * local dialog; "Import from GitHub" opens the import modal.
+		 * The workspace-add chooser occupant. The owner renders the flow occupant
+		 * inline, so this renders a native `Menu` (anchored to the flow's own
+		 * position via `getAnchorRect`) that lists where to add from; picking an
+		 * option opens that flow as a dialog.
 		 */
 		function WorkspaceAddChooser({ open, busy, onPicked, onCancel, onError, localList, localCreate, listRepos, importRepo }) {
 			const [view, setView] = React.useState("menu");
+			const anchorRef = React.useRef(null);
+			const selectingRef = React.useRef(false);
 
 			React.useEffect(() => { if (!open) { setView("menu"); } }, [open]);
 
 			if (!open) return null;
 
-			let content;
+			if (view === "menu") {
+				return React.createElement(React.Fragment, null,
+					React.createElement("span", { ref: anchorRef, style: { display: "inline-block", width: 0, height: 0, visibility: "hidden" } }),
+					React.createElement(primitives.Menu, {
+						open: open,
+						portal: true,
+						side: "bottom",
+						getAnchorRect: () => (anchorRef.current ? anchorRef.current.getBoundingClientRect() : null),
+						onClose: () => { if (!selectingRef.current) onCancel(); selectingRef.current = false; },
+						onSelect: (id) => { selectingRef.current = true; if (id === "local") setView("local"); else if (id === "github") setView("github"); },
+						items: [
+							{ id: "local", label: "Local workspace", icon: React.createElement(primitives.IconFolderOpen16, { size: 16 }) },
+							{ id: "github", label: "Import from GitHub", icon: React.createElement(primitives.IconPlusOutline16, { size: 16 }) }
+						]
+					}));
+			}
+
+			let modal;
 			if (view === "github") {
-				content = React.createElement(GithubImportModal, {
+				modal = React.createElement(GithubImportModal, {
 					listRepos, importRepo,
 					onPicked: (path) => onPicked(path),
 					onError: (msg) => onError(msg),
 					onBack: () => setView("menu"),
 					onCancel: () => onCancel()
 				});
-			} else if (view === "local") {
-				content = React.createElement(LocalDirDialog, {
+			} else {
+				modal = React.createElement(LocalDirDialog, {
 					localList, localCreate,
 					onPicked: (path) => onPicked(path),
 					onError: (msg) => onError(msg),
 					onCancel: () => onCancel()
 				});
-			} else {
-				content = React.createElement("div", { className: "dsh-github-chooser" },
-					React.createElement("div", { className: "dsh-github-chooser-title" }, "Add workspace"),
-					React.createElement("button", { className: "dsh-github-choice", disabled: busy, onClick: () => setView("local") }, "Add local workspace"),
-					React.createElement("button", { className: "dsh-github-choice", disabled: busy, onClick: () => setView("github") }, "Import from GitHub"),
-					React.createElement("button", { className: "dsh-github-choice dsh-github-cancel", onClick: onCancel }, "Cancel"));
 			}
 
-			// Render as a modal overlay (a new stacking/event context) rather than
-			// inline in the owner's popover row. The fixed backdrop isolates our
-			// clicks from the owner's close/outside-click handler and centers the
-			// dialog like the in-app browse dialog.
-			return React.createElement("div", {
-				className: "dsh-github-overlay",
-				"data-dsh-theme": resolveDark() ? "dark" : "light",
-				onMouseDown: (e) => { if (e.target === e.currentTarget) onCancel(); }
-			}, React.createElement("div", { className: "dsh-github-dialog" }, content));
+			// Chosen flow renders through the native Modal primitive
+			// (`@deepseek-ai/dsh-client-ui-primitives`) rather than a hand-rolled
+			// fixed overlay: it provides the backdrop, centering, focus handling,
+			// escape-to-close, and the themed dialog surface. Each sub-view supplies
+			// its own header/content/footer, matching the shipped directory-browser
+			// dialog.
+			return React.createElement(primitives.Modal, {
+				open: open,
+				onClose: () => { if (!busy) onCancel(); },
+				title: view === "github" ? "Import from GitHub" : "Add local workspace",
+				className: "dsh-github-dialog",
+				headless: true
+			}, modal);
+		}
+
+		/** Does the user layer carry an owned entry for this field (not value compare)? */
+		function isOverridden(user, field) {
+			return user != null && Object.prototype.hasOwnProperty.call(user, field);
 		}
 
 		/**
-		 * Settings → Plugins → GitHub card: shows token status, lets the user set
-		 * the PAT (written host-side to the credentials domain) and edit
-		 * cloneRoot / shallow through the `github` settings namespace.
+		 * The GitHub card's staged form over the `github` settings namespace.
+		 *
+		 * Mirrors the shipped `CardForm` model (available/writable/dirty/saving/
+		 * failed + per-field overridden/reset) but adds a boolean `shallow` and a
+		 * write-only PAT control written through the host RPC. Edits are staged
+		 * and only written on save; the Host is the authority on acceptance.
+		 *
+		 * Reads the section through `snapshot.value?.field` (not the snapshot
+		 * object itself) and binds the scope with `{ namespace }` — the
+		 * `settingsScope.bind` spec key.
 		 */
-		function GithubSettingsCard({ getStatus, setToken, clearToken, settingsScope }) {
-			const [snapshot, setSnapshot] = React.useState(null);
-			const [configured, setConfigured] = React.useState(null);
-			const [cloneRoot, setCloneRoot] = React.useState("");
-			const [shallow, setShallow] = React.useState(true);
-			const [token, setTokenInput] = React.useState("");
-			const [status, setStatus] = React.useState("");
-			const [busy, setBusy] = React.useState(false);
+		class GithubSettingsCardController {
+			constructor(injected) {
+				this.getStatus = injected.getStatus;
+				this.setToken = injected.setToken;
+				this.clearToken = injected.clearToken;
+				this.scope = injected.settingsScope && injected.settingsScope.bind
+					? injected.settingsScope.bind({ namespace: "github" })
+					: null;
+				this.staged = new Map();
+				this.saving = false;
+				this.failed = false;
+				this.tokenConfigured = null;
+				this.listeners = new Set();
+				this.offScope = null;
+				if (this.scope && typeof this.scope.subscribe === "function") {
+					this.offScope = this.scope.subscribe(() => this.publish());
+				}
+				this.refreshToken();
+			}
 
-			const scope = settingsScope && settingsScope.bind ? settingsScope.bind({ ns: "github" }) : null;
+			refreshToken() {
+				if (!this.getStatus) return;
+				this.getStatus().then((s) => {
+					this.tokenConfigured = !!s.configured;
+					this.publish();
+				}).catch(() => {
+					this.tokenConfigured = false;
+					this.publish();
+				});
+			}
 
-			const refresh = () => {
-				const snap = scope ? scope.getSnapshot() : null;
-				setSnapshot(snap);
-				const section = snap && typeof snap.getSnapshot === "function" ? snap : snap;
-				setCloneRoot((section && section.cloneRoot) || "");
-				setShallow((section && section.shallow) === false ? false : true);
-				getStatus().then((s) => setConfigured(!!s.configured)).catch(() => setConfigured(false));
-			};
+			snapshot() {
+				return this.scope ? this.scope.getSnapshot() : null;
+			}
+			value() {
+				const s = this.snapshot();
+				return s && s.value ? s.value : {};
+			}
+			user() {
+				const s = this.snapshot();
+				return s && s.user ? s.user : {};
+			}
+			available() {
+				const s = this.snapshot();
+				return this.scope != null && s != null && s.status !== "unavailable";
+			}
+			writable() {
+				const s = this.snapshot();
+				return this.scope != null && s != null && !!s.writable;
+			}
+
+			/** One control's state: draft text/checked, and whether saving would leave an override. */
+			field(field) {
+				const staged = this.staged.get(field);
+				if (field === "token") {
+					return { text: staged ? staged.text : "", overridden: false, invalid: false };
+				}
+				if (field === "shallow") {
+					const current = this.value().shallow !== false; // schema default true
+					if (staged === undefined) return { checked: current, overridden: isOverridden(this.user(), "shallow"), invalid: false };
+					if (staged.clear) return { checked: current, overridden: false, invalid: false };
+					return { checked: staged.checked, overridden: true, invalid: false };
+				}
+				// cloneRoot (free text)
+				const current = this.value().cloneRoot || "";
+				if (staged === undefined) return { text: current, overridden: isOverridden(this.user(), "cloneRoot"), invalid: false };
+				if (staged.clear) return { text: current, overridden: false, invalid: false };
+				return { text: staged.text, overridden: true, invalid: false };
+			}
+
+			/** Whether a save would write anything (a non-blank token always counts). */
+			dirty() {
+				for (const [field, staged] of this.staged) {
+					if (field === "token") { if (staged.text && staged.text.trim()) return true; continue; }
+					if (field === "shallow") {
+						const current = this.value().shallow !== false;
+						if (staged.clear) { if (isOverridden(this.user(), "shallow")) return true; }
+						else if (staged.checked !== current) return true;
+					} else {
+						const current = this.value().cloneRoot || "";
+						if (staged.clear) { if (isOverridden(this.user(), "cloneRoot")) return true; }
+						else if (staged.text !== current) return true;
+					}
+				}
+				return false;
+			}
+
+			editCloneRoot(text) { this.stage("cloneRoot", { text, clear: false }); }
+			resetCloneRoot() { this.stage("cloneRoot", { clear: true }); }
+			toggleShallow(checked) { this.stage("shallow", { checked, clear: false }); }
+			resetShallow() { this.stage("shallow", { clear: true }); }
+			editToken(text) { this.stage("token", { text, clear: false }); }
+
+			stage(field, edit) {
+				this.staged.set(field, edit);
+				this.failed = false;
+				this.publish();
+			}
+
+			discard() {
+				if (this.staged.size === 0 && !this.failed) return;
+				this.staged.clear();
+				this.failed = false;
+				this.publish();
+			}
+
+			/** Write every staged edit, then re-seed from what the Host accepted. */
+			async save() {
+				if (!this.scope || this.saving) return;
+				const writes = [];
+				for (const [field, staged] of this.staged) {
+					if (field === "token") {
+						if (staged.text && staged.text.trim()) writes.push({ kind: "token", value: staged.text.trim() });
+						continue;
+					}
+					if (field === "shallow") {
+						if (staged.clear) { if (isOverridden(this.user(), "shallow")) writes.push({ kind: "set", field: "shallow", clear: true }); }
+						else if (staged.checked !== (this.value().shallow !== false)) writes.push({ kind: "set", field: "shallow", value: staged.checked });
+					} else {
+						if (staged.clear) { if (isOverridden(this.user(), "cloneRoot")) writes.push({ kind: "set", field: "cloneRoot", clear: true }); }
+						else if (staged.text !== (this.value().cloneRoot || "")) writes.push({ kind: "set", field: "cloneRoot", value: staged.text });
+					}
+				}
+				this.saving = true; this.failed = false; this.publish();
+				let landed = true;
+				for (const write of writes) {
+					try {
+						if (write.kind === "token") await this.setToken({ value: write.value });
+						else if (write.clear) await this.scope.unset(write.field);
+						else await this.scope.set(write.field, write.value);
+					} catch (error) {
+						landed = false;
+						break;
+					}
+				}
+				if (landed) { this.staged.clear(); this.refreshToken(); }
+				this.saving = false;
+				this.failed = !landed;
+				this.publish();
+			}
+
+			/** Write-only clear of the stored PAT (not a staged edit). */
+			clearTokenAction() {
+				if (!this.clearToken || this.tokenConfigured !== true) return Promise.resolve();
+				this.tokenConfigured = false; this.publish();
+				return this.clearToken().catch(() => {
+					this.tokenConfigured = true;
+					this.publish();
+				});
+			}
+
+			projection() {
+				return {
+					available: this.available(),
+					writable: this.writable(),
+					dirty: this.dirty(),
+					saving: this.saving,
+					failed: this.failed,
+					cloneRoot: this.field("cloneRoot"),
+					shallow: this.field("shallow"),
+					token: this.field("token"),
+					tokenConfigured: this.tokenConfigured
+				};
+			}
+
+			publish() { for (const listener of this.listeners) listener(); }
+			subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+			dispose() { if (this.offScope) this.offScope(); this.listeners.clear(); }
+		}
+
+		/**
+		 * Settings → Plugins → GitHub card: a collapsible plugin card matching the
+		 * shipped `PluginCard` chrome. Shows the PAT status (write-only credential
+		 * control) and lets the user edit cloneRoot / shallow through the `github`
+		 * settings namespace with a staged save/discard model.
+		 */
+		function GithubSettingsCard(props) {
+			const [controller] = React.useState(() => new GithubSettingsCardController(props));
+			const [, force] = React.useState(0);
+			const [open, setOpen] = React.useState(false);
 
 			React.useEffect(() => {
-				if (!scope) { setStatus("Settings channel unavailable"); return; }
-				refresh();
-				const unsub = scope.subscribe && scope.subscribe(() => refresh());
-				return () => { if (unsub) unsub(); };
-				/* eslint-disable-line react-hooks/exhaustive-deps */
-			}, []);
+				const off = controller.subscribe(() => force((n) => n + 1));
+				return () => { off(); controller.dispose(); };
+			}, [controller]);
 
-			const saveConfig = () => {
-				setBusy(true); setStatus("");
-				const writes = [];
-				if (scope && typeof scope.set === "function") {
-					if (cloneRoot !== snapshot.cloneRoot) writes.push(scope.set("cloneRoot", cloneRoot));
-					if (shallow !== snapshot.shallow) writes.push(scope.set("shallow", shallow));
-				}
-				Promise.all(writes).then(() => {
-					if (token) return setToken({ value: token }).then(() => { setTokenInput(""); setStatus("Saved"); });
-					setStatus("Saved");
-				}).catch((err) => setStatus(String((err && err.message) || err))).then(() => setBusy(false));
-			};
+			const state = controller.projection();
+			if (!state.available) return null;
 
-			return React.createElement("div", { className: "dsh-github-card" },
-				React.createElement("div", { className: "dsh-github-card-status" },
-					configured === true ? "Token configured" : configured === false ? "Token not configured" : "Checking…",
-					status ? React.createElement("span", { className: "dsh-github-card-detail" }, " (" + status + ")") : null),
-				React.createElement("label", { className: "dsh-github-field" },
-					"Personal access token",
-					React.createElement("input", {
-						type: "password", value: token, placeholder: configured ? "•••••••• (leave blank to keep)" : "ghp_…",
-						onChange: (e) => setTokenInput(e.target.value)
-					})),
-				React.createElement("label", { className: "dsh-github-field" },
-					"Clone root",
-					React.createElement("input", { value: cloneRoot, onChange: (e) => setCloneRoot(e.target.value) })),
-				React.createElement("label", { className: "dsh-github-field" },
-					React.createElement("input", { type: "checkbox", checked: shallow, onChange: (e) => setShallow(e.target.checked) }),
-					" Shallow clone"),
-				React.createElement("div", { className: "dsh-github-card-actions" },
-					React.createElement("button", { className: "dsh-github-save", disabled: busy, onClick: saveConfig }, busy ? "Saving…" : "Save"),
-					configured
-						? React.createElement("button", { className: "dsh-github-clear", disabled: busy, onClick: () => { setBusy(true); clearToken().catch((e) => setStatus(String(e.message || e))).then(() => { setConfigured(false); setBusy(false); }); } }, "Clear token")
-						: null));
+			const resettable = state.writable && !state.saving;
+			const blocked = !state.dirty || state.saving;
+
+			return React.createElement("li", { className: "dsh-github-card" + (open ? " dsh-github-cardOpen" : "") },
+				React.createElement("button", {
+					type: "button",
+					className: "dsh-github-card-head",
+					"aria-expanded": open,
+					"aria-label": (open ? "Hide settings" : "Show settings") + ": GitHub",
+					onClick: () => setOpen(!open)
+				},
+					React.createElement("span", { className: "dsh-github-card-headText" },
+						React.createElement("span", { className: "dsh-github-card-name" }, "GitHub"),
+						React.createElement("span", { className: "dsh-github-card-description" }, "Clone GitHub repos into this workspace and manage the access token.")),
+					state.dirty ? React.createElement("span", { className: "dsh-github-card-pending" }, "Unsaved") : null,
+					React.createElement(primitives.IconChevronDownOutline14, { size: 14, className: "dsh-github-card-chevron" + (open ? " dsh-github-card-chevronOpen" : "") })),
+				open ? React.createElement("div", { className: "dsh-github-card-body" },
+					!state.writable ? React.createElement("p", { className: "dsh-github-card-readOnly", role: "status" }, "This deployment stores settings read-only.") : null,
+					React.createElement("div", { className: "dsh-github-field" },
+						React.createElement("div", { className: "dsh-github-field-head" },
+							React.createElement("label", { className: "dsh-github-field-label", htmlFor: "plugin-config-github-token" }, "Personal access token"),
+							React.createElement("span", { className: "dsh-github-field-badges" },
+								React.createElement("span", { className: state.tokenConfigured ? "dsh-github-field-badge" : "dsh-github-field-badgeMuted" },
+									state.tokenConfigured === null ? "Checking…" : state.tokenConfigured ? "A key is configured." : "No key is configured; import is unavailable until one is."))),
+						React.createElement("input", {
+							id: "plugin-config-github-token",
+							className: "dsh-github-field-input",
+							type: "password",
+							autoComplete: "off",
+							value: state.token.text,
+							disabled: !state.writable || state.saving,
+							placeholder: state.tokenConfigured ? "•••••••• (leave blank to keep)" : "ghp_…",
+							onChange: (e) => controller.editToken(e.target.value)
+						}),
+						React.createElement("p", { className: "dsh-github-field-hint" }, "Stored outside the settings file. Leave blank to keep the current key.")),
+					React.createElement("div", { className: "dsh-github-field" },
+						React.createElement("div", { className: "dsh-github-field-head" },
+							React.createElement("label", { className: "dsh-github-field-label", htmlFor: "plugin-config-github-cloneRoot" }, "Clone root"),
+							React.createElement("span", { className: "dsh-github-field-badges" },
+								state.cloneRoot.overridden ? React.createElement("span", { className: "dsh-github-field-badge" }, "Overridden") : null,
+								state.cloneRoot.overridden ? React.createElement("button", { type: "button", className: "dsh-github-field-reset", disabled: !resettable, onClick: () => controller.resetCloneRoot() }, "Reset to default") : null)),
+						React.createElement("input", {
+							id: "plugin-config-github-cloneRoot",
+							className: "dsh-github-field-input",
+							type: "text",
+							value: state.cloneRoot.text,
+							disabled: !state.writable || state.saving,
+							onChange: (e) => controller.editCloneRoot(e.target.value)
+						}),
+						React.createElement("p", { className: "dsh-github-field-hint" }, "Directory imported repos are cloned under.")),
+					React.createElement("div", { className: "dsh-github-field" },
+						React.createElement("div", { className: "dsh-github-field-head" },
+							React.createElement("label", { className: "dsh-github-field-label", htmlFor: "plugin-config-github-shallow" }, "Shallow clone"),
+							React.createElement("span", { className: "dsh-github-field-badges" },
+								state.shallow.overridden ? React.createElement("span", { className: "dsh-github-field-badge" }, "Overridden") : null,
+								state.shallow.overridden ? React.createElement("button", { type: "button", className: "dsh-github-field-reset", disabled: !resettable, onClick: () => controller.resetShallow() }, "Reset to default") : null)),
+						React.createElement("label", { className: "dsh-github-field-control" },
+							React.createElement("input", {
+								id: "plugin-config-github-shallow",
+								className: "dsh-github-field-input",
+								type: "checkbox",
+								checked: state.shallow.checked,
+								disabled: !state.writable || state.saving,
+								onChange: (e) => controller.toggleShallow(e.target.checked)
+							}),
+							React.createElement("span", { className: "dsh-github-field-hint" }, "Clone with --depth 1 (full clone when off)"))),
+					React.createElement("div", { className: "dsh-github-card-footer" },
+						state.failed ? React.createElement("p", { className: "dsh-github-card-failed", role: "status" }, "The deployment did not accept these values; they were left for you to correct.") : null,
+						state.tokenConfigured ? React.createElement("button", { type: "button", className: "dsh-github-card-discard", disabled: !resettable, onClick: () => controller.clearTokenAction() }, "Clear token") : null,
+						React.createElement("button", { type: "button", className: "dsh-github-card-discard", disabled: !state.dirty || state.saving, onClick: () => controller.discard() }, "Discard"),
+						React.createElement("button", { type: "button", className: "dsh-github-card-save", disabled: blocked, onClick: () => controller.save() }, state.saving ? "Saving…" : "Save")))
+					: null);
 		}
 
 		/**
@@ -376,7 +620,10 @@ window.__ModuleLoader__.load({
 				localList: (args) => hostCall(ctx, "github/local-list", args),
 				localCreate: (args) => hostCall(ctx, "github/local-create", args),
 				listRepos: (args) => hostCall(ctx, "github/list-user-repos", args),
-				importRepo: (args) => hostCall(ctx, "github/import", args),
+				importRepo: (args) => hostCall(ctx, "github/import", args)
+			});
+
+			const settingsInjected = () => ({
 				getStatus: () => hostCall(ctx, "github/status", {}),
 				setToken: (args) => hostCall(ctx, "github/set-token", args),
 				clearToken: () => hostCall(ctx, "github/clear-token", {}),
@@ -398,7 +645,7 @@ window.__ModuleLoader__.load({
 				name: "settings.plugin.item",
 				key: "github",
 				locale: "github",
-				inject: injected
+				inject: settingsInjected
 			}, GithubSettingsCard));
 		}
 
