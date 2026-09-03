@@ -267,7 +267,10 @@ window.__ModuleLoader__.load({
 					name: "settings.plugin.item",
 					key: "notify",
 					locale: "notify",
-					inject: injected
+					// Must be a FUNCTION returning the props (the harness calls
+					// inject() per render). A static object is the classic cause of
+					// "TypeError: inject is not a function" -> the card never mounts.
+					inject: function () { return injected; }
 				}, NotifySettingsCard);
 			});
 		}
