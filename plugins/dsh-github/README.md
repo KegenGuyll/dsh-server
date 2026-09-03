@@ -2,7 +2,10 @@
 
 An out-of-tree DeepSeek Harness plugin (dual-face: host + browser) that turns the
 workspace "Add workspace…" flow into a two-option chooser and registers a
-token/status card under **Settings → Plugins → Plugin configuration**.
+collapsible settings card under **Settings → Plugins → Plugin configuration**
+for the PAT (a write-only status/token control), the clone root, and the
+shallow-clone flag — staged behind a Save/Discard footer like the shipped
+plugin cards.
 
 - **Add local workspace** — a self-contained compact directory dialog (navigate
   the host filesystem, create a folder) over this plugin's own host handlers.
@@ -52,16 +55,12 @@ service methods below. `lib/index.js` declares the handlers; `lib/client.js`
 invokes them and receives serializable results. Because the browser must never
 hold the PAT, this is the one unavoidable host round trip.
 
-The handlers are registered with `harness.handle` and called with `host.call` —
-the **dynamic-Cordis** client→host mechanism, which is mounted in the web
-profile via `cordis-host-runner`/`cordis-client-runner`. **Note:** durable plugins
-normally expose a service to the browser through a **generated Remote** (e.g.
-`ctx.workspaces`), which needs the harness typert/cordis codegen step. That
-codegen is not runnable from this thin-wrapper repo, so this plugin currently
-uses the `harness`/`host` RPC instead. Confirm on a live server that the mounted
-cordis-runner makes `harness.handle`/`host.call` available to a durable (non-dynamic)
-plugin; if not, switch these to a generated `github` Remote (add the typert/cordis
-build to the Docker stage).
+The handlers are registered on the generic Connection RPC channel
+(`ctx.connection.rpc` with `authority: 'trusted-host'`) and invoked from the
+browser with `rpc.call('/rpc', method, args)` — the durable transport that works
+over the tailnet, unlike the loopback-only settings RPCs. A generated Remote is
+an alternative but requires the harness typert/cordis codegen step, which is not
+runnable from this thin-wrapper repo; the generic RPC channel avoids that.
 
 Methods:
 - `github/list-user-repos` `{ page, perPage }` → `{ items, hasMore }`
@@ -107,9 +106,8 @@ and cannot be fully confirmed by static inspection:
 
 - peer-dependency resolution of the `@deepseek-ai/dsh-*` framework packages from
   the profile install;
-- the **client→host channel**: durable plugins normally expose a generated
-  Remote (typert codegen). This plugin uses `harness.handle`/`host.call` (the
-  dynamic-Cordis mechanism); confirm it is available to a durable plugin, or
-  add a generated `github` Remote to the build;
+- the **client→host channel**: the generic Connection RPC (`rpc.call('/rpc', …)`)
+  must be reachable from the browser (authority `trusted-host`); confirm on a
+  live server, since remote browsers keep the settings plane loopback-only;
 - the directory-flow owner-props contract (the chooser receives `open`/`busy`/
   `onPicked`/`onCancel`/`onError` plus the injected action props).

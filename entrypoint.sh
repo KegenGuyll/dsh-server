@@ -38,6 +38,13 @@ if [ -e /opt/dsh-notify/install.mjs ]; then
   node /opt/dsh-notify/install.mjs
 fi
 
+# Configure git to use gh as the credential helper, so the agent can git-push /
+# open PRs using the token persisted on the persistent /data/gh volume
+# (GH_CONFIG_DIR). Idempotent and harmless when gh isn't authenticated yet.
+if command -v gh >/dev/null 2>&1 && [ -f "${GH_CONFIG_DIR:-/data/gh}/hosts.yml" ]; then
+  gh auth setup-git || true
+fi
+
 exec dsh web \
   --host 127.0.0.1 \
   --port 3080 \

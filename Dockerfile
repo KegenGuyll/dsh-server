@@ -17,6 +17,26 @@ RUN apt-get update \
   && npm install -g @deepseek-ai/dsh@0.1.1-rc.2 \
   && npm install -g pnpm
 
+# Loosen the settings/credentials configuration plane so it honors --trusted-host
+# instead of being pinned to loopback. Upstream keeps these privileged methods
+# (settings.describe/update/mutate, credentials.*, agentPreset.*,
+# llm.discoverModels) loopback-only until a real auth layer exists; this
+# deployment's auth boundary is the tailnet (docs/dsh.md). The patch script is
+# idempotent and fails the build loudly if the upstream layout changes so the
+# deviation is never silently dropped on a dsh upgrade.
+COPY patches/trusted-config-plane.mjs /patches/trusted-config-plane.mjs
+RUN node /patches/trusted-config-plane.mjs
+
+# The DSH *client* also pins the settings plane to loopback: the settings mirror
+# and per-namespace scope are created with `connection.isLoopback ? "host" :
+# "memory"`, so a page served over the trusted tailnet FQDN leaves the mirror
+# "memory" (unavailable) and the UI fails with "settings are unavailable in this
+# browser" even though the server fence above accepts the request. Pin both to
+# "host" so the browser reads/writes settings over the wire; the server fence is
+# the authoritative gate. Same idempotent + fail-loud contract as above.
+COPY patches/client-loopback-settings.mjs /patches/client-loopback-settings.mjs
+RUN node /patches/client-loopback-settings.mjs
+
 # The out-of-tree dsh-github plugin (host + client bundle + idempotent installer)
 # is baked into the image; entrypoint.sh auto-installs it into the web profile
 # on first boot. The plugin is resolved at its real path (/opt/dsh-github), so its
@@ -62,13 +82,27 @@ RUN cd /opt/dsh-notify \
 # /workspaces = the agent's cwd (project checkouts)
 # Ownership is baked into the image so freshly created named volumes inherit
 # the node user instead of root.
-RUN mkdir -p /data /workspaces && chown -R node:node /data /workspaces
+RUN mkdir -p /data /data/gh /workspaces && chown -R node:node /data /workspaces
+
+# gh CLI for the harness agent: lets the agent git-push and open PRs without a
+# per-session download. The auth token lives on the persistent dsh-data volume
+# via GH_CONFIG_DIR below, so once a device-flow login is done the token
+# survives container recreation and gh is authenticated on every boot.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl \
+  && rm -rf /var/lib/apt/lists/* \
+  && GH_ARCH=$(uname -m | sed -E 's/x86_64/amd64/; s/aarch64|arm64/arm64/') \
+  && curl -fsSL "https://github.com/cli/cli/releases/download/v2.99.0/gh_2.99.0_linux_${GH_ARCH}.tar.gz" -o /tmp/gh.tgz \
+  && tar -C /tmp -xzf /tmp/gh.tgz \
+  && install -m 0755 "/tmp/gh_2.99.0_linux_${GH_ARCH}/bin/gh" /usr/local/bin/gh \
+  && rm -rf "/tmp/gh_2.99.0_linux_${GH_ARCH}" /tmp/gh.tgz
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV DSH_HOME=/data \
-    DSH_TELEMETRY_DISABLED=1
+    DSH_TELEMETRY_DISABLED=1 \
+    GH_CONFIG_DIR=/data/gh
 
 USER node
 WORKDIR /workspaces

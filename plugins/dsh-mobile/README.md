@@ -16,7 +16,10 @@ On mobile-width viewports it:
   by title, each workspace shown as a **folder-icon header row** with a **plus
   button at the right** that starts a new session in that workspace, and each
   session row showing its **relative last-used time** (e.g. `5min`, `1h`, `5d`).
-  Tapping a session opens it. A translucent backdrop dismisses the drawer.
+  Tapping a session opens it. **Holding (long-press) a session row opens a bottom
+  action sheet** with the per-session actions **Rename**, **Fork**, and
+  **Archive** (the same three the desktop sidebar exposes). Archived sessions are
+  hidden from the drawer list. A translucent backdrop dismisses the drawer.
 - Leaves the **prompt bar** untouched.
 
 The drawer is the plugin's own workspace → session list, built only from the
