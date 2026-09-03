@@ -180,6 +180,11 @@ async function localCreate(path, name) {
  * with `authority: 'trusted-host'` (unlike the loopback-only settings RPCs that
  * 403 on a remote browser). `harness.handle`/`host.call` is the dynamic-Cordis
  * mechanism and is not available to a durable plugin, so it is not used here.
+ *
+ * The channel is namespaced to this plugin (`/github`): `connection.rpc`
+ * registers one physical prefix route per channel, so two plugins must never
+ * share a channel name. dsh-notify owns `/notify`; reserving a per-plugin
+ * channel is what prevents the "duplicate prefix route" plugin-load failure.
  */
 function registerHandlers(ctx, scope) {
 	const conn = ctx.get("connection");
@@ -189,7 +194,7 @@ function registerHandlers(ctx, scope) {
 		return;
 	}
 
-	rpc.handle("/rpc", async (endpoint, payload) => {
+	rpc.handle("/github", async (endpoint, payload) => {
 		try {
 			let value;
 			switch (endpoint) {

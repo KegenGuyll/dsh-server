@@ -332,11 +332,13 @@ function apply(ctx, config) {
 	}
 
 	// Client -> host RPC on the generic Connection channel (works over the
-	// tailnet with `authority: 'trusted-host'`, like dsh-github).
+	// tailnet with `authority: 'trusted-host'`, like dsh-github). The channel
+	// must be unique per plugin: dsh-github owns `/github`, so this one is
+	// namespaced to `/notify` (two plugins cannot share a channel prefix).
 	const connection = ctx.get("connection");
 	const rpc = connection?.rpc;
 	if (rpc && typeof rpc.handle === "function") {
-		rpc.handle("/rpc", async (endpoint, payload) => {
+		rpc.handle("/notify", async (endpoint, payload) => {
 			try {
 				let value;
 				switch (endpoint) {
