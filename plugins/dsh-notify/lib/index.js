@@ -379,6 +379,31 @@ function apply(ctx, config) {
 						value = { ok: true };
 						break;
 					}
+					case "notify/get-config": {
+						value = scope.get();
+						break;
+					}
+					case "notify/set-config": {
+						// Persist notify config through the host settings scope (NOT the
+						// browser settingsScope, whose writes don't reach the host over
+						// the tailnet). This Connection RPC is trusted-host, so it works
+						// like notify/set-token and notify/test.
+						const patch = payload ?? {};
+						const fields = ["topicUrl", "titlePrefix", "enabled", "notifyDone", "notifyInput", "minDoneSeconds", "cooldownSeconds", "suppressWhenVisible"];
+						const clean = {};
+						for (const f of fields) if (f in patch) clean[f] = patch[f];
+						if ("enabled" in clean) clean.enabled = !!clean.enabled;
+						if ("notifyDone" in clean) clean.notifyDone = !!clean.notifyDone;
+						if ("notifyInput" in clean) clean.notifyInput = !!clean.notifyInput;
+						if ("suppressWhenVisible" in clean) clean.suppressWhenVisible = !!clean.suppressWhenVisible;
+						if ("minDoneSeconds" in clean) clean.minDoneSeconds = Number(clean.minDoneSeconds);
+						if ("cooldownSeconds" in clean) clean.cooldownSeconds = Number(clean.cooldownSeconds);
+						if ("topicUrl" in clean) clean.topicUrl = String(clean.topicUrl ?? "").trim();
+						if ("titlePrefix" in clean) clean.titlePrefix = String(clean.titlePrefix ?? "").trim() || "DSH";
+						await scope.update(clean);
+						value = scope.get();
+						break;
+					}
 					default:
 						throw new Error(`notify: unknown endpoint '${endpoint}'`);
 				}
