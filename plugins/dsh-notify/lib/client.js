@@ -76,12 +76,11 @@ window.__ModuleLoader__.load({
 		 */
 		function NotifySettingsCard(props) {
 			var getStatus = props.getStatus;
+			var getConfig = props.getConfig;
+			var setConfig = props.setConfig;
 			var setToken = props.setToken;
 			var clearToken = props.clearToken;
 			var sendTest = props.sendTest;
-			var settingsScope = props.settingsScope;
-
-			var scope = settingsScope && settingsScope.bind ? settingsScope.bind({ ns: "notify" }) : null;
 
 			var baseState = React.useState({});
 			var base = baseState[0];
@@ -118,15 +117,20 @@ window.__ModuleLoader__.load({
 			}
 
 			React.useEffect(function () {
-				if (!scope) { setNotice("Settings channel unavailable"); return; }
-				applyBase(scope.getSnapshot ? scope.getSnapshot() : null);
+				// Read config through the host Connection RPC (trusted-host), which
+				// works over the tailnet — unlike the browser settingsScope, whose
+				// reads/writes are loopback-only and don't reach the host through the
+				// tailnet proxy.
+				getConfig().then(function (c) {
+					applyBase(c || {});
+				}).catch(function () {
+					setNotice("Could not load config");
+				});
 				getStatus().then(function (s) {
 					setStatus({ configured: !!s.configured, tokenSet: !!s.tokenSet });
 				}).catch(function () {
 					setStatus({ configured: false, tokenSet: false });
 				});
-				var unsub = scope.subscribe && scope.subscribe(function () { applyBase(scope.getSnapshot ? scope.getSnapshot() : null); });
-				return function () { if (unsub) unsub(); };
 				/* eslint-disable-line react-hooks/exhaustive-deps */
 			}, []);
 
@@ -153,21 +157,24 @@ window.__ModuleLoader__.load({
 			}
 
 			function save() {
-				if (!scope || typeof scope.set !== "function") { setNotice("Settings channel unavailable"); return; }
 				setBusy(true); setNotice("");
-				var writes = [];
-				if (form.topicUrl !== base.topicUrl) writes.push(scope.set("topicUrl", form.topicUrl));
-				if (form.titlePrefix !== base.titlePrefix) writes.push(scope.set("titlePrefix", form.titlePrefix));
-				if (form.enabled !== (base.enabled !== false)) writes.push(scope.set("enabled", form.enabled));
-				if (form.notifyDone !== (base.notifyDone !== false)) writes.push(scope.set("notifyDone", form.notifyDone));
-				if (form.notifyInput !== (base.notifyInput !== false)) writes.push(scope.set("notifyInput", form.notifyInput));
-				if (form.minDoneSeconds !== base.minDoneSeconds) writes.push(scope.set("minDoneSeconds", form.minDoneSeconds));
-				if (form.cooldownSeconds !== base.cooldownSeconds) writes.push(scope.set("cooldownSeconds", form.cooldownSeconds));
-				if (form.suppressWhenVisible !== (base.suppressWhenVisible !== false)) writes.push(scope.set("suppressWhenVisible", form.suppressWhenVisible));
+				var payload = {
+					topicUrl: form.topicUrl,
+					titlePrefix: form.titlePrefix,
+					enabled: form.enabled,
+					notifyDone: form.notifyDone,
+					notifyInput: form.notifyInput,
+					minDoneSeconds: Number(form.minDoneSeconds),
+					cooldownSeconds: Number(form.cooldownSeconds),
+					suppressWhenVisible: form.suppressWhenVisible
+				};
+				// Persist through the host Connection RPC (trusted-host), not the
+				// browser settingsScope, so the write reaches the host over the tailnet.
+				var configSave = setConfig(payload);
 				var tokenSave = tokenInput.trim() ? setToken({ value: tokenInput.trim() }) : Promise.resolve();
-				Promise.all(writes.concat([tokenSave])).then(function () {
+				Promise.all([configSave, tokenSave]).then(function () {
 					setTokenInput(""); setNotice("Saved");
-					return getStatus().then(function (s) { setStatus({ configured: !!s.configured, tokenSet: !!s.tokenSet }); }).catch(function () {});
+					return getStatus().then(function (s) { setStatus({ configured: !!s.configured, tokenSet: !!s.tokenSet, cfg: s }); }).catch(function () {});
 				}).catch(function (err) { setNotice(String(err && err.message || err)); }).then(function () { setBusy(false); });
 			}
 
@@ -256,10 +263,11 @@ window.__ModuleLoader__.load({
 
 			var injected = {
 				getStatus: function () { return hostCall(ctx, "notify/status", {}); },
+				getConfig: function () { return hostCall(ctx, "notify/get-config", {}); },
+				setConfig: function (args) { return hostCall(ctx, "notify/set-config", args); },
 				setToken: function (args) { return hostCall(ctx, "notify/set-token", args); },
 				clearToken: function () { return hostCall(ctx, "notify/clear-token", {}); },
-				sendTest: function () { return hostCall(ctx, "notify/test", {}); },
-				settingsScope: ctx.get("settingsScope")
+				sendTest: function () { return hostCall(ctx, "notify/test", {}); }
 			};
 
 			ctx.slots.inject("settings.plugin.item", function () {
