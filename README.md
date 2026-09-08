@@ -28,11 +28,13 @@ entrypoint.sh                  node /opt/dsh-github/install.mjs (idempotent), th
                                node /opt/dsh-mobile/install.mjs (idempotent), then
                                node /opt/dsh-stt/install.mjs (idempotent), then
                                node /opt/dsh-notify/install.mjs (idempotent), then
+                               node /opt/dsh-preview/install.mjs (idempotent), then
                                dsh web --host 127.0.0.1 --port 3080 --no-open --trusted-host "$DSH_TRUSTED_HOST"
 plugins/dsh-github/            out-of-tree GitHub workspace-import plugin (host + client bundle + installer)
 plugins/dsh-mobile/            Gemini-style mobile skin (client bundle + installer; hides the menu, adds New Session)
 plugins/dsh-stt/               out-of-tree speech-to-text composer mic plugin (browser-only + installer)
 plugins/dsh-notify/            out-of-tree ntfy push on task-complete / needs-input plugin (host + client bundle + installer)
+plugins/dsh-preview/           out-of-tree dev-server preview gateway (host-only + installer)
 .github/workflows/deploy.yml   calls personal-pipeline's reusable deploy-service.yml
 ```
 
@@ -144,6 +146,37 @@ and never leaves the host. See
 config reference. Same bundle install flow (`dsh.bundle.patch` →
 `cordis.patch.yml` inserts the `notify` row) and an idempotent,
 version-marker-gated `install.mjs`.
+
+## dsh-preview plugin
+
+The image ships an out-of-tree **host-only** plugin, `dsh-preview`, so the agent
+can start a dev server in a workspace and hand you a private **Tailscale** HTTPS
+link to view it:
+
+- The agent calls **`start_dev_server`** (e.g. `command="npm run dev"`,
+  `cwd="/workspaces/<repo>"`). The plugin spawns the command bound to
+  `127.0.0.1`, detects the listening port, registers it under `/dev/<slug>/`, and
+  returns `https://dsh.<tailnet>.ts.net:<port>/dev/<slug>/`.
+- `stop_dev_server` kills the process group and unregisters the route;
+  `list_dev_servers` lists live previews.
+- A loopback reverse-proxy "gateway" (default port `8443`) routes
+  `/dev/<slug>/...` to each running dev server and serves an index at `/`.
+
+Exposure is a **single static `tailscale serve` entry** on the shared Tailscale
+node — the container shares that node's network namespace, so its loopback is
+reachable by the sidecar, and the plugin needs **no `tailscale` CLI/socket**:
+
+```sh
+# run once on the sidecar / host (idempotent); PREVIEW_GATEWAY_PORT must match:
+tailscale serve --https=8443 --set-path=/ 127.0.0.1:8443
+```
+
+The DSH `443` serve config is untouched. Because previews are served under a
+sub-path, the dev app must be started with the matching base path (Vite
+`--base=/dev/<slug>/`, Next `basePath`) — the tool returns the slug so you can.
+Previews are in-memory and private (tailnet-only; no Funnel). See
+[`plugins/dsh-preview/README.md`](plugins/dsh-preview/README.md) for the full
+config reference, the base-path guidance, and the one-time Serve setup.
 
 ## Runtime contract
 
