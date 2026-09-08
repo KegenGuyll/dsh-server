@@ -92,7 +92,8 @@ window.__ModuleLoader__.load({
 			".dsh-github-field-input:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none;}",
 			".dsh-github-field-input:disabled{color:var(--dsw-alias-label-tertiary);cursor:default;}",
 			".dsh-github-field-input[type=checkbox]{height:auto;width:auto;padding:0;}",
-			".dsh-github-field-hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5;}"
+			".dsh-github-field-hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5;}",
+			".dsh-github-worktrees-head{border-top:1px solid var(--dsw-alias-border-l2);margin:14px 0 0;padding-top:12px;color:var(--dsw-alias-label-primary);font-size:12px;font-weight:600;line-height:1.5;}"
 		].join("\n");
 
 		function injectStyles() {
@@ -105,7 +106,26 @@ window.__ModuleLoader__.load({
 		injectStyles();
 
 		/** Required client services (Cordis fibre inject). */
-		const inject = ["slots"];
+		const inject = ["slots", "workspaces", "sessions"];
+
+		/** Worktree settings field names (flat, top-level keys on the `github` namespace). */
+		var WORKTREE_FIELDS = [
+			"worktreeEnabled", "worktreeRoot", "worktreeBranch", "worktreeDetached",
+			"worktreeCleanupOnArchive", "worktreeMaxPerRepo", "worktreeKeepOnFailure",
+			"worktreePruneOnStartup"
+		];
+		function wtIsBool(field) {
+			return field === "worktreeEnabled" || field === "worktreeDetached" || field === "worktreeCleanupOnArchive" ||
+				field === "worktreeKeepOnFailure" || field === "worktreePruneOnStartup";
+		}
+		function wtIsNumber(field) { return field === "worktreeMaxPerRepo"; }
+		function wtIsText(field) { return field === "worktreeRoot" || field === "worktreeBranch"; }
+		function wtIsField(field) { return WORKTREE_FIELDS.indexOf(field) !== -1; }
+		function wtCurrent(value, field) {
+			if (wtIsBool(field)) return value[field] !== false; // schema default true
+			if (wtIsNumber(field)) return Number.isFinite(value[field]) ? value[field] : 50;
+			return value[field] || "";
+		}
 
 		/** Bound client→host caller over the generic Connection RPC channel. */
 		function hostCall(ctx, method, args) {
@@ -402,6 +422,20 @@ window.__ModuleLoader__.load({
 
 			/** One control's state: draft text/checked, and whether saving would leave an override. */
 			field(field) {
+				if (wtIsField(field)) {
+					const staged = this.staged.get(field);
+					const overridden = isOverridden(this.user(), field);
+					if (wtIsBool(field)) {
+						const current = wtCurrent(this.value(), field);
+						if (staged === undefined) return { checked: current, overridden, invalid: false };
+						if (staged.clear) return { checked: current, overridden: false, invalid: false };
+						return { checked: !!staged.checked, overridden: true, invalid: false };
+					}
+					const current = wtCurrent(this.value(), field);
+					if (staged === undefined) return { text: String(current), overridden, invalid: false };
+					if (staged.clear) return { text: String(current), overridden: false, invalid: false };
+					return { text: staged.text, overridden: true, invalid: false };
+				}
 				const staged = this.staged.get(field);
 				if (field === "token") {
 					return { text: staged ? staged.text : "", overridden: false, invalid: false };
@@ -419,10 +453,27 @@ window.__ModuleLoader__.load({
 				return { text: staged.text, overridden: true, invalid: false };
 			}
 
+			/** Edit/reset actions for the worktree fields. */
+			editWorktreeText(field, text) { this.stage(field, { text, clear: false }); }
+			toggleWorktree(field, checked) { this.stage(field, { checked: !!checked, clear: false }); }
+			resetWorktree(field) { this.stage(field, { clear: true }); }
+
 			/** Whether a save would write anything (a non-blank token always counts). */
 			dirty() {
 				for (const [field, staged] of this.staged) {
 					if (field === "token") { if (staged.text && staged.text.trim()) return true; continue; }
+					if (wtIsField(field)) {
+						const current = wtCurrent(this.value(), field);
+						if (staged.clear) { if (isOverridden(this.user(), field)) return true; continue; }
+						if (wtIsBool(field)) { if (!!staged.checked !== current) return true; continue; }
+						if (wtIsNumber(field)) {
+							const n = Number(staged.text);
+							if (!Number.isFinite(n) || n !== current) return true;
+							continue;
+						}
+						if (staged.text !== String(current)) return true;
+						continue;
+					}
 					if (field === "shallow") {
 						const current = this.value().shallow !== false;
 						if (staged.clear) { if (isOverridden(this.user(), "shallow")) return true; }
@@ -462,6 +513,14 @@ window.__ModuleLoader__.load({
 				for (const [field, staged] of this.staged) {
 					if (field === "token") {
 						if (staged.text && staged.text.trim()) writes.push({ kind: "token", value: staged.text.trim() });
+						continue;
+					}
+					if (wtIsField(field)) {
+						const current = wtCurrent(this.value(), field);
+						if (staged.clear) { if (isOverridden(this.user(), field)) writes.push({ kind: "set", field, clear: true }); }
+						else if (wtIsBool(field)) { if (!!staged.checked !== current) writes.push({ kind: "set", field, value: !!staged.checked }); }
+						else if (wtIsNumber(field)) { const n = Number(staged.text); if (Number.isFinite(n) && n !== current) writes.push({ kind: "set", field, value: n }); }
+						else if (staged.text !== String(current)) writes.push({ kind: "set", field, value: staged.text });
 						continue;
 					}
 					if (field === "shallow") {
@@ -510,7 +569,15 @@ window.__ModuleLoader__.load({
 					cloneRoot: this.field("cloneRoot"),
 					shallow: this.field("shallow"),
 					token: this.field("token"),
-					tokenConfigured: this.tokenConfigured
+					tokenConfigured: this.tokenConfigured,
+					worktreeEnabled: this.field("worktreeEnabled"),
+					worktreeRoot: this.field("worktreeRoot"),
+					worktreeBranch: this.field("worktreeBranch"),
+					worktreeDetached: this.field("worktreeDetached"),
+					worktreeCleanupOnArchive: this.field("worktreeCleanupOnArchive"),
+					worktreeMaxPerRepo: this.field("worktreeMaxPerRepo"),
+					worktreeKeepOnFailure: this.field("worktreeKeepOnFailure"),
+					worktreePruneOnStartup: this.field("worktreePruneOnStartup")
 				};
 			}
 
@@ -519,11 +586,46 @@ window.__ModuleLoader__.load({
 			dispose() { if (this.offScope) this.offScope(); this.listeners.clear(); }
 		}
 
+		/** One Worktrees settings row (checkbox or text/number input) in the card. */
+		function renderWorktreeField(controller, state, field, label, hint, type) {
+			const ctl = state[field];
+			const resettable = state.writable && !state.saving;
+			const head = React.createElement("div", { className: "dsh-github-field-head" },
+				React.createElement("label", { className: "dsh-github-field-label", htmlFor: "plugin-config-github-" + field }, label),
+				React.createElement("span", { className: "dsh-github-field-badges" },
+					ctl.overridden ? React.createElement("span", { className: "dsh-github-field-badge" }, "Overridden") : null,
+					ctl.overridden ? React.createElement("button", { type: "button", className: "dsh-github-field-reset", disabled: !resettable, onClick: () => controller.resetWorktree(field) }, "Reset to default") : null));
+			let control;
+			if (type === "bool") {
+				control = React.createElement("label", { className: "dsh-github-field-control" },
+					React.createElement("input", {
+						id: "plugin-config-github-" + field,
+						className: "dsh-github-field-input",
+						type: "checkbox",
+						checked: ctl.checked,
+						disabled: !state.writable || state.saving,
+						onChange: (e) => controller.toggleWorktree(field, e.target.checked)
+					}),
+					React.createElement("span", { className: "dsh-github-field-hint" }, hint));
+			} else {
+				control = React.createElement("input", {
+					id: "plugin-config-github-" + field,
+					className: "dsh-github-field-input",
+					type: type === "number" ? "number" : "text",
+					value: ctl.text,
+					disabled: !state.writable || state.saving,
+					onChange: (e) => controller.editWorktreeText(field, e.target.value)
+				});
+				if (hint) control = React.createElement(React.Fragment, null, control, React.createElement("p", { className: "dsh-github-field-hint" }, hint));
+			}
+			return React.createElement("div", { className: "dsh-github-field" }, head, control);
+		}
+
 		/**
 		 * Settings → Plugins → GitHub card: a collapsible plugin card matching the
 		 * shipped `PluginCard` chrome. Shows the PAT status (write-only credential
-		 * control) and lets the user edit cloneRoot / shallow through the `github`
-		 * settings namespace with a staged save/discard model.
+		 * control) and lets the user edit cloneRoot / shallow / worktree options
+		 * through the `github` settings namespace with a staged save/discard model.
 		 */
 		function GithubSettingsCard(props) {
 			const [controller] = React.useState(() => new GithubSettingsCardController(props));
@@ -604,6 +706,15 @@ window.__ModuleLoader__.load({
 								onChange: (e) => controller.toggleShallow(e.target.checked)
 							}),
 							React.createElement("span", { className: "dsh-github-field-hint" }, "Clone with --depth 1 (full clone when off)"))),
+					React.createElement("p", { className: "dsh-github-worktrees-head" }, "Worktree isolation — each new session in a git-backed workspace runs in its own worktree, removed on archive:"),
+					renderWorktreeField(controller, state, "worktreeEnabled", "Auto worktrees per session", "Create a worktree (and a worktree workspace) for every New Session in a git-backed workspace.", "bool"),
+					renderWorktreeField(controller, state, "worktreeRoot", "Worktree root", "Absolute directory worktrees are created under.", "text"),
+					renderWorktreeField(controller, state, "worktreeBranch", "Base branch", "Ref new worktrees start from (default origin/main); the agent can override per tool call.", "text"),
+					renderWorktreeField(controller, state, "worktreeDetached", "Detached HEAD", "Create worktrees at a detached HEAD; off starts a fresh `dsh/…` branch.", "bool"),
+					renderWorktreeField(controller, state, "worktreeCleanupOnArchive", "Remove on archive", "Remove the worktree (and its workspace row) when its session is archived.", "bool"),
+					renderWorktreeField(controller, state, "worktreeMaxPerRepo", "Max per repo", "Cap concurrent worktrees per repo (0 = unlimited).", "number"),
+					renderWorktreeField(controller, state, "worktreeKeepOnFailure", "Keep on failure", "Keep the worktree if session creation fails afterward (debugging).", "bool"),
+					renderWorktreeField(controller, state, "worktreePruneOnStartup", "Prune on startup", "Run `git worktree prune` and drop orphaned worktree workspace rows on startup.", "bool"),
 					React.createElement("div", { className: "dsh-github-card-footer" },
 						state.failed ? React.createElement("p", { className: "dsh-github-card-failed", role: "status" }, "The deployment did not accept these values; they were left for you to correct.") : null,
 						state.tokenConfigured ? React.createElement("button", { type: "button", className: "dsh-github-card-discard", disabled: !resettable, onClick: () => controller.clearTokenAction() }, "Clear token") : null,
@@ -613,10 +724,65 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
+		 * Wrap the shared New Session action so a session created in a
+		 * git-backed, worktree-enabled workspace lands in a fresh worktree. We wrap
+		 * `startSession` (not `connectWorkspace`) because the page-load initial
+		 * selection path calls `connectWorkspace` directly and must not spawn a
+		 * worktree on every load. The target resolution is replicated from the
+		 * original; for non-git or disabled workspaces it delegates straight to the
+		 * original implementation.
+		 */
+		function wrapStartSession(ctx) {
+			const ws = ctx.get("workspaces");
+			const sessions = ctx.get("sessions");
+			if (!ws || typeof ws.startSession !== "function" || !sessions || typeof sessions.create !== "function") {
+				console.warn("dsh-github: worktree New Session wrap skipped (workspaces/sessions runtime unavailable)");
+				return;
+			}
+			const original = ws.startSession.bind(ws);
+			ws.startSession = (workspaceId) => {
+				const list = ws.list.getSnapshot();
+				const current = sessions.list.getSnapshot().current;
+				const currentWorkspaceId = current === undefined ? undefined
+					: list.items.find((item) => item.sessionIds.includes(current))?.workspaceId;
+				const target = workspaceId ?? currentWorkspaceId ?? list.recentWorkspaceId;
+				if (target === undefined) { sessions.clear(); return; }
+				hostCall(ctx, "github/workspace-info", { workspaceId: target }).then((info) => {
+					if (!info || !info.isGitRepo || !info.worktreeEnabled) { original(workspaceId); return; }
+					hostCall(ctx, "github/create-worktree", { workspaceId: target })
+						.then((wt) => sessions.create({ workspaceId: wt.worktreeWorkspaceId, sessionId: wt.sessionId })
+							.then((sessionId) => sessions.open(sessionId))
+							.catch((err) => {
+								console.warn("dsh-github: worktree session create failed, falling back:", err);
+								if (!info.keepOnFailure && wt.worktreeWorkspaceId) {
+									hostCall(ctx, "github/remove-worktree", { worktreeWorkspaceId: wt.worktreeWorkspaceId }).catch(() => {});
+								}
+								original(workspaceId);
+							})
+						)
+						.catch((err) => {
+							console.warn("dsh-github: worktree create failed, falling back to a normal session:", err);
+							original(workspaceId);
+						});
+				}).catch((err) => {
+					console.warn("dsh-github: workspace-info failed, falling back:", err);
+					original(workspaceId);
+				});
+			};
+			// Undo the wrap on plugin stop/update so a later run starts from the
+			// original implementation rather than a nested wrapper.
+			const restore = () => { ws.startSession = original; };
+			if (typeof ctx.effect === "function") ctx.effect(restore);
+			else ctx.on?.("dispose", restore);
+		}
+
+		/**
 		 * Plugin body: register the chooser into both directory-flow holes (the
-		 * native occupant's two-hole pattern) and the settings card.
+		 * native occupant's two-hole pattern), the settings card, and the New
+		 * Session worktree wrap.
 		 */
 		function apply(ctx) {
+			wrapStartSession(ctx);
 			const injected = () => ({
 				localList: (args) => hostCall(ctx, "github/local-list", args),
 				localCreate: (args) => hostCall(ctx, "github/local-create", args),
