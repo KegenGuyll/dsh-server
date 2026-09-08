@@ -1,0 +1,38 @@
+{
+  "name": "dsh-preview",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness plugin: start a dev process in the workspace and expose it to the tailnet as a private HTTPS preview link via a loopback reverse-proxy gateway.",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "lib/index.js",
+    "lib/types/**/*.d.ts",
+    "lib/gateway.js",
+    "lib/process.js",
+    "lib/registry.js",
+    "cordis.patch.yml",
+    "install.mjs"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "http-proxy": "^1.18.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-settings": "^0.1.1-rc.2"
+  }
+}

@@ -1,0 +1,14 @@
+# dsh-preview bundle patch, applied automatically when this package is listed in
+# dsh.profile.bundles (the dsh CLI adds it there on `dsh plugin add` because this
+# package declares dsh.bundle.patch).
+#
+#   - Insert the host/service row for the plugin itself. The loader resolves
+#     `dsh-preview` from the profile's node_modules and calls `apply`; the plugin
+#     registers the dev-server tools and owns the loopback reverse-proxy gateway.
+#
+# This plugin is host-only and purely additive: no shipped rows are disabled and
+# it never touches the settings/credentials configuration plane.
+
+- insert:
+    - id: preview
+      name: 'dsh-preview'
