@@ -5,8 +5,8 @@
  * the host so "done" pings are suppressed while you are actually looking at DSH.
  *
  * All ntfy delivery runs on the host (the access token never crosses the wire);
- * the client calls the host through the generic Connection RPC channel
- * (`ctx.connection.rpc.call('/notify', method, args)`), whose handlers live in
+ * the client reaches the host through the exact `/api/notify` Fetch route the
+ * host half registers (`fetch('/api/notify', …)`), whose handlers live in
  * lib/index.js. It reads the `notify` settings namespace for the scalar config
  * fields (edits are batched behind a Save button, matching dsh-github).
  */
@@ -49,13 +49,28 @@ window.__ModuleLoader__.load({
 		/** Required client services (Cordis fibre inject). */
 		var inject = ["slots"];
 
-		/** Bound client -> host caller over the generic Connection RPC channel. */
-		function hostCall(ctx, method, args) {
-			var rpc = ctx.get("connection")?.rpc;
-			if (!rpc || typeof rpc.call !== "function") {
-				return Promise.reject(new Error("Notify host channel is unavailable"));
-			}
-			return rpc.call("/notify", method, args).then(function (result) {
+		/** Absolute host path this plugin's client→host calls are served on. */
+		var HOST_PATH = "/api/notify";
+
+		/**
+		 * Bound client→host caller. The host half registers this as an exact Fetch
+		 * route on the shared `/api` channel, so a call rides the page's own origin
+		 * and inherits the server's Host/Origin + browser-session fence.
+		 *
+		 * `ctx.connection.rpc.call('/notify', …)` would be the obvious transport, but
+		 * its host counterpart (`ctx.connection.rpc.handle`) cannot register a route
+		 * from an out-of-tree plugin on dsh 0.1.5-rc.2 — see `registerChannel` in
+		 * lib/index.js for the full diagnosis.
+		 */
+		function hostCall(method, args) {
+			return fetch(HOST_PATH, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ method: method, args: args })
+			}).then(function (response) {
+				if (!response.ok) throw new Error("Notify host request failed (HTTP " + response.status + ")");
+				return response.json();
+			}).then(function (result) {
 				if (result && result.ok) return result.value;
 				var message = (result && result.error && result.error.message) || "Notify request failed";
 				throw new Error(message);
@@ -253,7 +268,7 @@ window.__ModuleLoader__.load({
 			if (typeof document !== "undefined") {
 				var report = function () {
 					var visible = document.visibilityState === "visible";
-					hostCall(ctx, "notify/visible", { visible: visible }).catch(function () { /* ignore */ });
+					hostCall("notify/visible", { visible: visible }).catch(function () { /* ignore */ });
 				};
 				document.addEventListener("visibilitychange", report);
 				document.addEventListener("focus", report);
@@ -262,12 +277,12 @@ window.__ModuleLoader__.load({
 			}
 
 			var injected = {
-				getStatus: function () { return hostCall(ctx, "notify/status", {}); },
-				getConfig: function () { return hostCall(ctx, "notify/get-config", {}); },
-				setConfig: function (args) { return hostCall(ctx, "notify/set-config", args); },
-				setToken: function (args) { return hostCall(ctx, "notify/set-token", args); },
-				clearToken: function () { return hostCall(ctx, "notify/clear-token", {}); },
-				sendTest: function () { return hostCall(ctx, "notify/test", {}); }
+				getStatus: function () { return hostCall("notify/status", {}); },
+				getConfig: function () { return hostCall("notify/get-config", {}); },
+				setConfig: function (args) { return hostCall("notify/set-config", args); },
+				setToken: function (args) { return hostCall("notify/set-token", args); },
+				clearToken: function () { return hostCall("notify/clear-token", {}); },
+				sendTest: function () { return hostCall("notify/test", {}); }
 			};
 
 			ctx.slots.inject("settings.plugin.item", function () {

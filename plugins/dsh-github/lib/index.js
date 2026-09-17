@@ -7,10 +7,11 @@
  * several issues in parallel) and wraps `workspaceRegistry.archiveSession` so
  * archiving a session removes the worktrees it created.
  *
- * The client half addresses these methods through the generic Connection RPC
- * channel (`ctx.connection.rpc`, authority `trusted-host`), which works over the
- * tailnet. Everything runs on the host so the PAT never reaches the browser;
- * each handler re-resolves the token per call.
+ * The client half addresses these methods through an exact Fetch route this
+ * plugin registers on the shared `/api` channel (`ctx.connection.fetch`, path
+ * `/api/github`), which a browser reaches over the tailnet. Everything runs on
+ * the host so the PAT never reaches the browser; each handler re-resolves the
+ * token per call.
  */
 
 import z from "@deepseek-ai/schemastery";
@@ -692,30 +693,62 @@ function registerTools(ctx, scope) {
 	});
 }
 
+/** Absolute path this plugin's client→host calls are served on (see registerHandlers). */
+const HOST_PATH = "/api/github";
+
 /**
- * Register the client→host handlers on the generic Connection RPC channel
- * (`ctx.connection.rpc`), the durable transport that works over the tailnet
- * with `authority: 'trusted-host'` (unlike the loopback-only settings RPCs that
- * 403 on a remote browser). `harness.handle`/`host.call` is the dynamic-Cordis
- * mechanism and is not available to a durable plugin, so it is not used here.
+ * Register the client→host handlers as an exact Fetch route on the shared `/api`
+ * channel (`ctx.connection.fetch`). Everything runs on the host so the PAT never
+ * reaches the browser; `lib/client.js` is the only caller.
  *
- * The channel is namespaced to this plugin (`/github`): `connection.rpc`
- * registers one physical prefix route per channel, so two plugins must never
- * share a channel name. dsh-notify owns `/notify`; reserving a per-plugin
- * channel is what prevents the "duplicate prefix route" plugin-load failure.
+ * `ctx.connection.rpc.handle('/github', …)` would be the obvious transport, but
+ * on dsh 0.1.5-rc.2 it cannot register a route from an out-of-tree plugin. The
+ * handler mounts its route through the *service's own* shadowed context
+ * (`owner.effect(() => owner.webServer.register(route))`), and that context's
+ * fiber chain no longer injects `webServer`: 0.1.1 declared
+ * `inject: ["webServer"]` on the connection plugin, 0.1.5 moved it into an
+ * optional nested `ctx.inject(["webServer"], …)`. The resulting
+ * `cannot get property "webServer" without inject` is thrown inside
+ * `ctx.effect`, which records it instead of failing the plugin tree — so at best
+ * the channel silently never registers, and when `connection` is already up as
+ * this entry applies the same throw escapes `apply` and fails the whole tree.
+ *
+ * An exact Fetch route has none of that coupling. It is the documented public
+ * registry for "one exact, transport-independent Fetch route owned by a Host
+ * feature", it needs only `connection`, and the `/api` prefix route that serves
+ * it already applies Connection's fence (trusted Host/Origin plus the signed
+ * browser session). Exact routes are keyed by pathname, so the path is
+ * namespaced per plugin (`/api/github`; dsh-notify owns `/api/notify`) — a
+ * duplicate path fails the load loudly.
  */
 function registerHandlers(ctx, scope) {
-	const conn = ctx.get("connection");
-	const rpc = conn?.rpc;
-	if (!rpc || typeof rpc.handle !== "function") {
-		ctx.logger?.warn("github: connection RPC unavailable — the browser UI cannot reach the host");
+	if (typeof ctx.inject !== "function") {
+		ctx.logger?.warn("github: ctx.inject is unavailable — the browser UI cannot reach the host");
+		return;
+	}
+	ctx.inject(["connection"], (routeCtx) => registerHostRoute(routeCtx, ctx, scope));
+}
+
+/**
+ * Declare the `/api/github` route on the injected Connection context. The handler
+ * body keeps using the plugin's own `ctx`, which owns the `credentials` and
+ * `settings` injections it resolves per call.
+ *
+ * @param routeCtx - context that injects `connection`.
+ * @param ctx - the plugin's own context (settings/credentials owner).
+ * @param scope - the `github` settings scope.
+ */
+function registerHostRoute(routeCtx, ctx, scope) {
+	const routes = routeCtx.connection?.fetch;
+	if (!routes || typeof routes.register !== "function") {
+		routeCtx.logger?.warn("github: connection Fetch routes are unavailable — the browser UI cannot reach the host");
 		return;
 	}
 
-	rpc.handle("/github", async (endpoint, payload) => {
+	const handle = async (method, payload) => {
 		try {
 			let value;
-			switch (endpoint) {
+			switch (method) {
 				case "github/list-user-repos": {
 					const token = await resolveToken(ctx, scope);
 					if (!token) throw new Error("github: GitHub token is not configured (set the GITHUB_TOKEN env var)");
@@ -751,16 +784,31 @@ function registerHandlers(ctx, scope) {
 					break;
 				}
 				default:
-					throw new Error(`github: unknown endpoint '${endpoint}'`);
+					throw new Error(`github: unknown method '${method}'`);
 			}
 			return { ok: true, value };
 		} catch (error) {
 			// Log the full detail server-side so a client-side terse message can
 			// still be debugged from the container log.
-			ctx.logger?.error(`github RPC ${endpoint} failed: ${String(error?.message ?? error)}${error?.stack ? `\n${error.stack}` : ""}`);
+			ctx.logger?.error(`github RPC ${method} failed: ${String(error?.message ?? error)}${error?.stack ? `\n${error.stack}` : ""}`);
 			return { ok: false, error: { code: "internal", message: String(error?.message ?? error), details: {} } };
 		}
-	}, { authority: "trusted-host" });
+	};
+
+	// The route is an effect on the injected context, so unloading this plugin or
+	// the Connection service removes it.
+	routeCtx.effect(() => routes.register({
+		path: HOST_PATH,
+		methods: ["POST"],
+		requestBody: "buffered",
+		fetch: async (request) => {
+			const body = await request.json().catch(() => undefined);
+			if (body === null || typeof body !== "object" || typeof body.method !== "string") {
+				return Response.json({ ok: false, error: { code: "bad-request", message: "`method` (a string) is required", details: {} } });
+			}
+			return Response.json(await handle(body.method, body.args));
+		}
+	}), `github: ${HOST_PATH} Fetch route`);
 }
 
 /**

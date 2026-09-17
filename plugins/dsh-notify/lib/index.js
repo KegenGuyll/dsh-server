@@ -31,6 +31,9 @@ const inject = ["settings", "credentials"];
 /** Credential reference that holds the ntfy access token (sent as Bearer). */
 const TOKEN_REF = "NTFY_TOKEN";
 
+/** Absolute path this plugin's client→host calls are served on (see registerChannel). */
+const HOST_PATH = "/api/notify";
+
 /** Error-free short session label, or the short id when no title is readable. */
 function sessionLabel(agent) {
 	try {
@@ -331,17 +334,39 @@ function apply(ctx, config) {
 		});
 	}
 
-	// Client -> host RPC on the generic Connection channel (works over the
-	// tailnet with `authority: 'trusted-host'`, like dsh-github). The channel
-	// must be unique per plugin: dsh-github owns `/github`, so this one is
-	// namespaced to `/notify` (two plugins cannot share a channel prefix).
-	const connection = ctx.get("connection");
-	const rpc = connection?.rpc;
-	if (rpc && typeof rpc.handle === "function") {
-		rpc.handle("/notify", async (endpoint, payload) => {
+	// Client -> host calls for the configuration card. They are served by an exact
+	// Fetch route this plugin registers on the shared `/api` channel, so they ride
+	// the page's own origin and inherit the server's Host/Origin + browser-session
+	// fence.
+	//
+	// `ctx.connection.rpc.handle('/notify', …)` would be the obvious transport, but
+	// on dsh 0.1.5-rc.2 it cannot register a route from an out-of-tree plugin: the
+	// handler mounts its route through the *service's own* shadowed context
+	// (`owner.effect(() => owner.webServer.register(route))`), and that context's
+	// fiber chain no longer injects `webServer` — 0.1.1 declared it on the
+	// connection plugin, 0.1.5 moved it into an optional nested inject. The
+	// resulting `cannot get property "webServer" without inject` is thrown inside
+	// `ctx.effect`, which records it instead of failing the plugin tree, so the
+	// channel silently never registers. The exact Fetch route needs only
+	// `connection`, and its path is namespaced per plugin (`/api/notify`;
+	// dsh-github owns `/api/github`) because exact routes are keyed by pathname.
+
+	/**
+	 * Register the `/api/notify` route on the injected Connection context. The
+	 * handler body keeps using the plugin's own `ctx`/`scope`/`notify`.
+	 * @param routeCtx - context that injects `connection`.
+	 */
+	function registerChannel(routeCtx) {
+		const routes = routeCtx.connection?.fetch;
+		if (!routes || typeof routes.register !== "function") {
+			routeCtx.logger?.warn("notify: connection Fetch routes are unavailable — the browser configuration card cannot reach the host");
+			return;
+		}
+
+		const handle = async (method, payload) => {
 			try {
 				let value;
-				switch (endpoint) {
+				switch (method) {
 					case "notify/status": {
 						const cfg = scope.get();
 						const resolved = await ctx.credentials.resolve(credentialRef(TOKEN_REF)).catch(() => undefined);
@@ -405,17 +430,36 @@ function apply(ctx, config) {
 						break;
 					}
 					default:
-						throw new Error(`notify: unknown endpoint '${endpoint}'`);
+						throw new Error(`notify: unknown method '${method}'`);
 				}
 				return { ok: true, value };
 			} catch (error) {
-				ctx.logger?.error(`notify RPC ${endpoint} failed: ${String(error?.message ?? error)}`);
+				ctx.logger?.error(`notify RPC ${method} failed: ${String(error?.message ?? error)}`);
 				return { ok: false, error: { code: "internal", message: String(error?.message ?? error), details: {} } };
 			}
-		}, { authority: "trusted-host" });
-	} else {
-		ctx.logger?.warn("notify: connection RPC unavailable — the browser configuration card cannot reach the host");
+		};
+
+		// The route is an effect on the injected context, so unloading this plugin or
+		// the Connection service removes it.
+		routeCtx.effect(() => routes.register({
+			path: HOST_PATH,
+			methods: ["POST"],
+			requestBody: "buffered",
+			fetch: async (request) => {
+				const body = await request.json().catch(() => undefined);
+				if (body === null || typeof body !== "object" || typeof body.method !== "string") {
+					return Response.json({ ok: false, error: { code: "bad-request", message: "`method` (a string) is required", details: {} } });
+				}
+				return Response.json(await handle(body.method, body.args));
+			}
+		}), `notify: ${HOST_PATH} Fetch route`);
 	}
+
+	if (typeof ctx.inject !== "function") {
+		ctx.logger?.warn("notify: ctx.inject is unavailable — the browser configuration card cannot reach the host");
+		return;
+	}
+	ctx.inject(["connection"], registerChannel);
 }
 
 export { Config, name, inject, apply, sessionLabel, sessionIdOf, TOKEN_REF };

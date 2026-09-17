@@ -5,10 +5,10 @@
  * import modal, and registers a Settings → Plugins card for the token.
  *
  * All GitHub work runs on the host (the PAT never crosses the wire): the client
- * calls the host through the generic Connection RPC channel
- * (`ctx.connection.rpc.call('/github', method, args)`), with the host handlers
- * declared in index.js. The channel is namespaced to this plugin so it never
- * collides with another plugin's RPC channel (dsh-notify owns `/notify`).
+ * reaches the host through the exact `/api/github` Fetch route the host half
+ * registers (`fetch('/api/github', …)`), with the host handlers declared in
+ * index.js. The path is namespaced to this plugin so it never collides with
+ * another plugin's host route (dsh-notify owns `/api/notify`).
  */
 window.__ModuleLoader__.load({
 	id: "dsh-github",
@@ -131,13 +131,28 @@ window.__ModuleLoader__.load({
 			return value[field] || "";
 		}
 
-		/** Bound client→host caller over the generic Connection RPC channel. */
-		function hostCall(ctx, method, args) {
-			const rpc = ctx.get("connection")?.rpc;
-			if (!rpc || typeof rpc.call !== "function") {
-				return Promise.reject(new Error("GitHub host channel is unavailable"));
-			}
-			return rpc.call("/github", method, args).then((result) => {
+		/** Absolute host path this plugin's client→host calls are served on. */
+		const HOST_PATH = "/api/github";
+
+		/**
+		 * Bound client→host caller. The host half registers this as an exact Fetch
+		 * route on the shared `/api` channel, so a call rides the page's own origin
+		 * and inherits the server's Host/Origin + browser-session fence.
+		 *
+		 * `ctx.connection.rpc.call('/github', …)` would be the obvious transport,
+		 * but its host counterpart (`ctx.connection.rpc.handle`) cannot register a
+		 * route from an out-of-tree plugin on dsh 0.1.5-rc.2 — see
+		 * `registerHandlers` in lib/index.js for the full diagnosis.
+		 */
+		function hostCall(method, args) {
+			return fetch(HOST_PATH, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ method: method, args: args })
+			}).then((response) => {
+				if (!response.ok) throw new Error(`GitHub host request failed (HTTP ${response.status})`);
+				return response.json();
+			}).then((result) => {
 				if (result && result.ok) return result.value;
 				const message = (result && result.error && result.error.message) || "GitHub request failed";
 				throw new Error(message);
@@ -753,16 +768,16 @@ window.__ModuleLoader__.load({
 		 */
 		function apply(ctx) {
 			const injected = () => ({
-				localList: (args) => hostCall(ctx, "github/local-list", args),
-				localCreate: (args) => hostCall(ctx, "github/local-create", args),
-				listRepos: (args) => hostCall(ctx, "github/list-user-repos", args),
-				importRepo: (args) => hostCall(ctx, "github/import", args)
+				localList: (args) => hostCall("github/local-list", args),
+				localCreate: (args) => hostCall("github/local-create", args),
+				listRepos: (args) => hostCall("github/list-user-repos", args),
+				importRepo: (args) => hostCall("github/import", args)
 			});
 
 			const settingsInjected = () => ({
-				getStatus: () => hostCall(ctx, "github/status", {}),
-				setToken: (args) => hostCall(ctx, "github/set-token", args),
-				clearToken: () => hostCall(ctx, "github/clear-token", {}),
+				getStatus: () => hostCall("github/status", {}),
+				setToken: (args) => hostCall("github/set-token", args),
+				clearToken: () => hostCall("github/clear-token", {}),
 				settingsScope: ctx.get("settingsScope")
 			});
 
