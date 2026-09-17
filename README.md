@@ -8,7 +8,9 @@ upstream fork, no source modifications**.
 Access is private, over the tailnet: `https://dsh.<tailnet>.ts.net` from any
 device (phone at work, computer at home). All state lives server-side in
 persistent volumes, so sessions started on one device are resumable from
-another.
+another. Since dsh 0.1.5 the first visit from a given browser must carry a
+one-time token from the container log — see
+[Browser authentication](#browser-authentication).
 
 See [`docs/dsh.md`](https://github.com/KegenGuyll/personal-pipeline/blob/main/docs/dsh.md)
 for the full design, the shared-network-namespace rationale, and the
@@ -71,6 +73,19 @@ installs the plugin via the `dsh` CLI. Installation is guarded by a version
 marker in the profile, so a rebuilt image with a newer plugin version refreshes
 it while the persistent `/data` volume survives; it does not hand-edit the
 profile's `cordis.patch.yml`.
+
+**A dsh upgrade alone does not refresh them.** The marker records only the
+*plugin's* version (`plugins/dsh-*/install.mjs`: `beforeVer === ver`), so after a
+dsh bump the installer reports "already installed" and the plugins keep the
+client bundles they registered against the previous dsh. Force a re-registration
+by clearing the markers and restarting, which is idempotent and safe to repeat:
+
+```sh
+cd <personal-pipeline checkout>
+docker compose -f services/dsh-server/docker-compose.yml exec dsh-server \
+  rm -f /data/profiles/web/.dsh-*.installed
+docker compose -f services/dsh-server/docker-compose.yml restart dsh-server
+```
 
 ### Local picking
 
@@ -198,10 +213,44 @@ not match a different patch, so `^0.1.1-rc.2` never satisfies `0.1.5-rc.2`).
 It never merges and never deploys: pushing the bump branch does not trigger
 Deploy, which only listens to pushes on `main`. Run it on demand from the Actions
 tab to track a different dist-tag (`next`, `alpha`). Each PR body carries the
-verification checklist that an actual bump requires — the two `patches/`
-scripts matching upstream, and the plugin client bundles being re-patched (the
-`plugins/dsh-*/install.mjs` markers key on the *plugin's* version, so a dsh bump
-alone skips re-applying `dsh.bundle.patch`).
+verification checklist that an actual bump requires — `patches/client-loopback-settings.mjs`
+matching upstream, the browser sessions being re-established (see below), and the
+plugin client bundles being re-patched (the `plugins/dsh-*/install.mjs` markers
+key on the *plugin's* version, so a dsh bump alone skips re-applying
+`dsh.bundle.patch`).
+
+### Browser authentication
+
+dsh 0.1.5 replaced the old loopback-only privileged-methods gate with a real
+browser-auth layer, so the tailnet is no longer the only thing standing between a
+requester and the configuration plane. The `/api` fence now requires **both**:
+
+1. a declared `--trusted-host` authority (already set from `DSH_TRUSTED_HOST`), and
+2. a signed, authority-bound session cookie.
+
+The cookie is minted once from a launch URL carrying a per-process token. dsh
+prints it at startup even under `--no-open`, so it is in the container log:
+
+```sh
+cd <personal-pipeline checkout>
+docker compose -f services/dsh-server/docker-compose.yml logs dsh-server 2>&1 \
+  | grep -o 'http://127\.0\.0\.1:3080/?token=[A-Za-z0-9_-]*' | tail -1
+```
+
+The printed URL is loopback, and a cookie is bound to the authority that minted
+it — so substitute the tailnet host before using it, keeping the token:
+
+```
+https://<DSH_TRUSTED_HOST>/?token=<token>
+```
+
+That one visit mints a cookie for the tailnet authority and redirects to a clean
+`/`. Afterwards plain `https://<DSH_TRUSTED_HOST>/` works. The cookie lives 30
+days (`cookieMaxAgeDays`) and **survives container restarts**, because the signed
+secret is stored in the credentials domain on the persistent `/data` volume — the
+per-process token only has to be fetched again when a browser has no valid cookie
+(a new browser, a cleared cookie jar, or after 30 days). Requests without it are
+refused with `401`.
 
 ## Rolling back
 
@@ -209,9 +258,9 @@ Every build leaves its `sha-…` tag in GHCR. On the server:
 
 ```sh
 cd <personal-pipeline checkout>
-# put the previous sha in services/dsh/.env (TAG=sha-xxxxxxx) — or revert the
-# repo and push — then:
-docker compose -f services/dsh/docker-compose.yml up -d
+# put the previous sha in services/dsh-server/.env (TAG=sha-xxxxxxx) — or revert
+# the repo and push — then:
+docker compose -f services/dsh-server/docker-compose.yml up -d
 ```
 
 Detecting a stale pin is automatic; merging the bump is deliberate. Nothing here
