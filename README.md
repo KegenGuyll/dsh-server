@@ -8,9 +8,8 @@ upstream fork, no source modifications**.
 Access is private, over the tailnet: `https://dsh.<tailnet>.ts.net` from any
 device (phone at work, computer at home). All state lives server-side in
 persistent volumes, so sessions started on one device are resumable from
-another. Since dsh 0.1.5 the first visit from a given browser must carry a
-one-time token from the container log — see
-[Browser authentication](#browser-authentication).
+another. No login step: reaching that authority is the authorization — see
+[Access control](#access-control).
 
 See [`docs/dsh.md`](https://github.com/KegenGuyll/personal-pipeline/blob/main/docs/dsh.md)
 for the full design, the shared-network-namespace rationale, and the
@@ -213,44 +212,48 @@ not match a different patch, so `^0.1.1-rc.2` never satisfies `0.1.5-rc.2`).
 It never merges and never deploys: pushing the bump branch does not trigger
 Deploy, which only listens to pushes on `main`. Run it on demand from the Actions
 tab to track a different dist-tag (`next`, `alpha`). Each PR body carries the
-verification checklist that an actual bump requires — `patches/client-loopback-settings.mjs`
-matching upstream, the browser sessions being re-established (see below), and the
+verification checklist that an actual bump requires — both `patches/` scripts
+matching upstream (each fails the image build loudly when it does not), and the
 plugin client bundles being re-patched (the `plugins/dsh-*/install.mjs` markers
 key on the *plugin's* version, so a dsh bump alone skips re-applying
 `dsh.bundle.patch`).
 
-### Browser authentication
+### Access control
 
-dsh 0.1.5 replaced the old loopback-only privileged-methods gate with a real
-browser-auth layer, so the tailnet is no longer the only thing standing between a
-requester and the configuration plane. The `/api` fence now requires **both**:
+dsh 0.1.5 added a browser-auth layer: `/api` requests must come from a declared
+`--trusted-host` authority **and** carry a signed, authority-bound session
+cookie, which the index page mints when it is opened with a one-time
+`?token=<per-process secret>`.
 
-1. a declared `--trusted-host` authority (already set from `DSH_TRUSTED_HOST`), and
-2. a signed, authority-bound session cookie.
+That token is `randomBytes()` at startup — no env override, no CLI flag, no
+config field — and dsh writes it only to its own log. The PWA manifest dsh serves
+also pins `"start_url": "/"` with `"display": "fullscreen"`, so an installed app
+always launches at `/` and can never carry a token; an installed PWA keeps its
+own cookie jar too, so authenticating in a browser tab does not transfer.
 
-The cookie is minted once from a launch URL carrying a per-process token. dsh
-prints it at startup even under `--no-open`, so it is in the container log:
+`patches/trusted-host-session-bypass.mjs` therefore treats a request that already
+passed the Host/Origin fence as authenticated. `/api` and the index page accept
+loopback and the declared trusted host without a session cookie; nothing else
+changes:
 
-```sh
-cd <personal-pipeline checkout>
-docker compose -f services/dsh-server/docker-compose.yml logs dsh-server 2>&1 \
-  | grep -o 'http://127\.0\.0\.1:3080/?token=[A-Za-z0-9_-]*' | tail -1
-```
+| request | result |
+|---|---|
+| `Host` = `DSH_TRUSTED_HOST` (the tailnet FQDN) | allowed, no cookie |
+| loopback, including the compose healthcheck on `/` | allowed, no cookie |
+| any other authority | `403` |
+| cross-site (`Sec-Fetch-Site: cross-site`) or cross-origin `Origin` | `403` |
 
-The printed URL is loopback, and a cookie is bound to the authority that minted
-it — so substitute the tailnet host before using it, keeping the token:
+**The posture, stated plainly:** anyone who can reach that authority gets full
+access, including settings and credentials. The tailnet ACL is the auth boundary,
+not a cookie — which is what this deployment ran before 0.1.5, and what
+[`docs/dsh.md`](https://github.com/KegenGuyll/personal-pipeline/blob/main/docs/dsh.md)
+already declares. If a tailnet device is ever lost or shared, remove it from the
+tailnet; there is no second factor behind this.
 
-```
-https://<DSH_TRUSTED_HOST>/?token=<token>
-```
-
-That one visit mints a cookie for the tailnet authority and redirects to a clean
-`/`. Afterwards plain `https://<DSH_TRUSTED_HOST>/` works. The cookie lives 30
-days (`cookieMaxAgeDays`) and **survives container restarts**, because the signed
-secret is stored in the credentials domain on the persistent `/data` volume — the
-per-process token only has to be fetched again when a browser has no valid cookie
-(a new browser, a cleared cookie jar, or after 30 days). Requests without it are
-refused with `401`.
+The patch is idempotent and fails the image build loudly if upstream moves either
+gate, so this posture cannot silently revert to "token required" without a red
+build. If it ever does fail, re-derive the two markers in `HostConnectionService`
+(`requestRejection`, `authorizeIndex`) — do not loosen the checks.
 
 ## Rolling back
 

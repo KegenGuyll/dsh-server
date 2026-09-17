@@ -17,6 +17,25 @@ RUN apt-get update \
   && npm install -g @deepseek-ai/dsh@0.1.5-rc.2 \
   && npm install -g pnpm
 
+# The dsh 0.1.5 browser-auth layer demands a per-process launch token that only
+# exists in the container log, and the PWA manifest dsh serves pins
+# `"start_url": "/"` — so this deployment's only client (an installed PWA, whose
+# cookie jar is separate from the browser's) can never present one. Treat a
+# request that already passed the Host/Origin fence as authenticated instead:
+# /api and the index page accept loopback and the declared --trusted-host
+# authority without a session cookie. Unchanged: any other authority still gets
+# 403, as do cross-site and cross-origin requests.
+#
+# Being explicit about the posture: anyone who can reach that authority gets
+# full access, including settings and credentials. That is what this deployment
+# ran before 0.1.5, and it makes the tailnet ACL the auth boundary rather than a
+# cookie (docs/dsh.md). It also restores a 200 on `/`, which the compose
+# healthcheck requires.
+#
+# Idempotent, and fails the build loudly if either upstream site moves.
+COPY patches/trusted-host-session-bypass.mjs /patches/trusted-host-session-bypass.mjs
+RUN node /patches/trusted-host-session-bypass.mjs
+
 # The DSH *client* pins the settings plane to loopback: the client's describe
 # mirror and per-namespace scope bind to `ctx.remote.$host.isLoopback ? "host" :
 # "memory"`, so a page served over the trusted tailnet FQDN gets persistence
@@ -24,11 +43,10 @@ RUN apt-get update \
 # even though the server would accept the request. Pin that one decision to
 # "host" so the browser uses the host over the wire.
 #
-# The server /api fence stays the authoritative gate. Since dsh 0.1.5 it demands
-# both a declared --trusted-host authority and a signed, authority-bound browser
-# session cookie (upstream BrowserAuth), so this client-side pin cannot widen
-# access by itself: an untrusted authority, or a page without a valid session,
-# is refused server-side regardless of what the client believes.
+# The server fence stays the authoritative gate: it still requires a declared
+# --trusted-host authority (or loopback) and still rejects cross-site requests.
+# The session-bypass patch above drops only the cookie requirement for those
+# already-fenced authorities, so this client-side pin cannot widen access.
 #
 # patches/trusted-config-plane.mjs is deliberately gone. It relaxed a
 # PRIVILEGED_METHODS gate that pinned the settings/credentials methods to

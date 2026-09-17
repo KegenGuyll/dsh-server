@@ -179,17 +179,16 @@ jobs:
             echo
             echo "### Verify before merging"
             echo
-            echo "- [ ] \`patches/client-loopback-settings.mjs\` still matches the upstream layout. It is designed to"
-            echo "      fail the image build loudly if not — that failure is the intended signal, not a reason to"
-            echo "      weaken the patch."
+            echo "- [ ] Both \`patches/\` scripts still match the upstream layout: \`trusted-host-session-bypass.mjs\`"
+            echo "      (the /api and index session gate) and \`client-loopback-settings.mjs\` (settings persistence)."
+            echo "      Each is designed to fail the image build loudly if not — that failure is the intended signal,"
+            echo "      not a reason to weaken the patch."
             echo "- [ ] Plugin client bundles are re-patched. \`plugins/dsh-*/install.mjs\` gates on the *plugin's own* version"
             echo "      marker in the profile, so a dsh bump alone prints \"already installed\" and skips re-applying"
             echo "      \`dsh.bundle.patch\`. Bump the affected plugin versions, or delete the \`.dsh-*.installed\` markers on"
             echo "      the \`/data\` volume, so the patches are re-applied against the new client bundle."
-            echo "- [ ] Browser sessions are re-established if this bump crosses an auth change: since dsh 0.1.5 the /api"
-            echo "      fence requires a signed, authority-bound session cookie minted from the launch URL printed at"
-            echo "      startup, so the UI answers \`401\` over the tailnet FQDN until one visit carries that token"
-            echo "      (\`README.md\` § Browser authentication)."
+            echo "- [ ] No login is required over the tailnet FQDN, and \`/api\` is still \`403\` for an authority that is not"
+            echo "      \`DSH_TRUSTED_HOST\` (the session-bypass patch widens nothing beyond the declared host)."
             echo "- [ ] Web UI loads over the tailnet FQDN, and the settings/credentials cards work (the patched settings plane)."
             echo "- [ ] Existing sessions resume, and the four plugins still mount."
             echo
