@@ -93,9 +93,10 @@ when it is a **linked worktree** (its `.git` is a file) *inside the archiving
 session's own container*. Cleanup never consults the live settings, so changing
 `worktreeDir` cannot strand an existing tree, and no other session's worktree can
 match. Containers are removed when their session is archived
-(`worktreeCleanupOnArchive`), and `worktreePruneOnStartup` removes containers
-whose session no longer exists (younger than two minutes are left alone, and the
-pass is skipped entirely if the session list is unreadable).
+(`worktreeCleanupOnArchive`), removing the last worktree by tool drops the
+now-empty container, and `worktreePruneOnStartup` removes containers whose
+session no longer exists (younger than two minutes are left alone, and the pass is
+skipped entirely if the session list is unreadable).
 
 Creates are serialized per session container (so the `worktreeMaxPerSession`
 count and the create cannot race), and `removeWorktree` verifies the directory is

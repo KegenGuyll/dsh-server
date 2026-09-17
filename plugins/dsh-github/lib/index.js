@@ -356,6 +356,14 @@ async function removeWorktreeForSession(exec, scope, args) {
 		throw new Error(`github: refusing to remove '${worktreePath}' — not a worktree in this session's container`);
 	}
 	await removeWorktree({ worktreePath });
+	// Drop the container once its last worktree is gone, so removing every
+	// worktree by hand leaves nothing behind (archive cleanup does the same).
+	try {
+		const rest = await readdir(container);
+		if (rest.length === 0) await rm(container, { recursive: true, force: true });
+	} catch {
+		// The container was already gone.
+	}
 	return { removed: true, worktreePath };
 }
 
