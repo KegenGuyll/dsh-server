@@ -185,6 +185,24 @@ image. Session logs are forward-compatible by design (versioned headers +
 read-compat path), and the web profile resolves bundles from the installed dsh
 first, so an old profile boots against a new install.
 
+### Knowing when the pin is stale
+
+Deploy only runs on a push to `main`, so nothing here would otherwise notice that
+upstream published a new dsh — a stale pin is invisible. `.github/workflows/dsh-version-check.yml`
+closes that gap: every Monday it reads the pin out of the `Dockerfile`, asks the
+npm registry for the current `latest` dist-tag, and when they differ opens a PR
+bumping the pin *and* the `@deepseek-ai/dsh-*` peer ranges in
+`plugins/*/package.json` (those must move together — a caret on a prerelease does
+not match a different patch, so `^0.1.1-rc.2` never satisfies `0.1.5-rc.2`).
+
+It never merges and never deploys: pushing the bump branch does not trigger
+Deploy, which only listens to pushes on `main`. Run it on demand from the Actions
+tab to track a different dist-tag (`next`, `alpha`). Each PR body carries the
+verification checklist that an actual bump requires — the two `patches/`
+scripts matching upstream, and the plugin client bundles being re-patched (the
+`plugins/dsh-*/install.mjs` markers key on the *plugin's* version, so a dsh bump
+alone skips re-applying `dsh.bundle.patch`).
+
 ## Rolling back
 
 Every build leaves its `sha-…` tag in GHCR. On the server:
@@ -196,4 +214,5 @@ cd <personal-pipeline checkout>
 docker compose -f services/dsh/docker-compose.yml up -d
 ```
 
-Updates are deliberate (a version bump in a commit); there is no auto-update.
+Detecting a stale pin is automatic; merging the bump is deliberate. Nothing here
+upgrades or deploys itself — the scheduled job only proposes a PR.
