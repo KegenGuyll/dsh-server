@@ -1,0 +1,210 @@
+name: dsh version check
+
+# The image pins an exact @deepseek-ai/dsh version (Dockerfile), and Deploy only
+# runs on a push to main — so nothing in this repo ever notices when upstream
+# publishes a newer dsh. Without this job a stale pin is invisible: no signal,
+# no failure, no PR, and the service keeps rebuilding the same old version.
+#
+# This job closes that gap. It reads the pin, asks the npm registry for the
+# current dist-tag, and opens a reviewable PR bumping the pin (plus the plugin
+# peer ranges that must move in lockstep) when they differ. It never merges and
+# never deploys: pushing the PR branch does not trigger Deploy, because
+# deploy.yml only listens to pushes on main.
+
+on:
+  schedule:
+    # Mondays 14:00 UTC. Upstream cuts releases every few days, so weekly keeps
+    # the pin within a week of latest without opening a PR on every release.
+    - cron: "0 14 * * 1"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "npm dist-tag to track (latest, next, alpha)"
+        required: false
+        type: string
+        default: latest
+
+# Needed to push the bump branch and open its PR.
+permissions:
+  contents: write
+  pull-requests: write
+
+# Never let two runs race on the same branch.
+concurrency:
+  group: dsh-version-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the bump branch can be based on and pushed against
+          # origin/main without a shallow-clone push failure.
+          fetch-depth: 0
+
+      - name: Resolve pinned and published versions
+        id: v
+        env:
+          TAG: ${{ inputs.tag || 'latest' }}
+        run: |
+          set -euo pipefail
+
+          # The pin is exactly one line: `npm install -g @deepseek-ai/dsh@<version>`.
+          # If that layout ever changes, fail loudly instead of silently
+          # comparing an empty string.
+          PINNED="$(grep -m1 -oE '@deepseek-ai/dsh@[^ ]+' Dockerfile | sed 's/.*@//')"
+          if [ -z "$PINNED" ]; then
+            echo "::error::could not read the pinned @deepseek-ai/dsh version from Dockerfile (expected 'npm install -g @deepseek-ai/dsh@<version>')"
+            exit 1
+          fi
+
+          curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh" -o /tmp/dsh-registry.json
+          PUBLISHED="$(node -e '
+            const tags = JSON.parse(require("fs").readFileSync("/tmp/dsh-registry.json", "utf8"))["dist-tags"];
+            const tag = process.argv[1];
+            if (!(tag in tags)) {
+              console.error(`dist-tag "${tag}" not found; available: ${Object.keys(tags).sort().join(", ")}`);
+              process.exit(1);
+            }
+            process.stdout.write(tags[tag]);
+          ' "$TAG")"
+
+          echo "pinned=$PINNED" >> "$GITHUB_OUTPUT"
+          echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "branch=chore/dsh-$PUBLISHED" >> "$GITHUB_OUTPUT"
+
+          if [ "$PINNED" = "$PUBLISHED" ]; then
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+            echo "pin is current: $PINNED ($TAG)"
+          else
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::dsh pin is stale: Dockerfile has $PINNED, $TAG is $PUBLISHED"
+          fi
+
+      - name: Apply the bump
+        if: steps.v.outputs.stale == 'true'
+        env:
+          PINNED: ${{ steps.v.outputs.pinned }}
+          PUBLISHED: ${{ steps.v.outputs.published }}
+        run: |
+          set -euo pipefail
+
+          sed -i "s|npm install -g @deepseek-ai/dsh@[^ ]*|npm install -g @deepseek-ai/dsh@${PUBLISHED}|" Dockerfile
+          grep -q "npm install -g @deepseek-ai/dsh@${PUBLISHED}" Dockerfile \
+            || { echo "::error::Dockerfile pin rewrite failed"; exit 1; }
+
+          # The plugins declare the harness packages as peers and are never
+          # installed from a registry (the harness provides them), but the range
+          # must still be honest: `^0.1.1-rc.2` does NOT satisfy `0.1.5-rc.2`,
+          # because semver prereleases only match a comparator carrying the same
+          # major.minor.patch. Rewrite only the @deepseek-ai/dsh-* peers —
+          # @deepseek-ai/cordis is a different package and stays put — and
+          # preserve the operator that was there (^, ~, or an exact pin).
+          # Anchoring on the old version means an unrecognized range form is left
+          # untouched and caught by the guard below, never mangled.
+          for f in plugins/*/package.json; do
+            sed -i "s|\(\"@deepseek-ai/dsh-[a-z0-9-]*\": \"[~^]*\)${PINNED}|\1${PUBLISHED}|g" "$f"
+          done
+
+          # Fail loudly if a manifest still references the old version: it used a
+          # form this rewrite does not cover, and a silent partial bump is worse
+          # than no bump.
+          if grep -REs "@deepseek-ai/dsh-[a-z0-9-]*\": \"[^\"]*${PINNED}" plugins/*/package.json; then
+            echo "::error::a plugin manifest still references ${PINNED} after the rewrite"
+            exit 1
+          fi
+
+          git diff --stat
+
+      - name: Open or refresh the bump PR
+        if: steps.v.outputs.stale == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PINNED: ${{ steps.v.outputs.pinned }}
+          PUBLISHED: ${{ steps.v.outputs.published }}
+          TAG: ${{ steps.v.outputs.tag }}
+          BRANCH: ${{ steps.v.outputs.branch }}
+        run: |
+          set -euo pipefail
+
+          # Machine-owned branch: rebuilt from origin/main on every run, so
+          # stale content from an earlier run is always replaced.
+          git checkout -B "$BRANCH" origin/main
+          git add -A
+          if git diff --cached --quiet; then
+            # main already carries the bump (e.g. it was merged after the PR was
+            # opened). Nothing to do.
+            echo "nothing to bump: main already pins $PUBLISHED"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(deps): bump @deepseek-ai/dsh to $PUBLISHED"
+
+          # Releases between the pin and the target, oldest first, so the
+          # reviewer can see how far the jump is.
+          node -e '
+            const data = JSON.parse(require("fs").readFileSync("/tmp/dsh-registry.json", "utf8"));
+            const [pinned, target] = [process.argv[1], process.argv[2]];
+            const times = data.time;
+            Object.keys(data.versions)
+              .filter(v => v !== pinned && v !== target && times[v] && times[pinned] && times[pinned] < times[v] && times[v] <= times[target])
+              .sort((a, b) => (times[a] < times[b] ? -1 : 1))
+              .forEach(v => console.log(`- \`${v}\` (${times[v].slice(0, 10)})`));
+          ' "$PINNED" "$PUBLISHED" > /tmp/between.md || true
+          if [ ! -s /tmp/between.md ]; then
+            echo "- (no intervening releases)" > /tmp/between.md
+          fi
+
+          {
+            echo "Automated version check — the \`@deepseek-ai/dsh\` pin in \`Dockerfile\` is behind the npm \`$TAG\` dist-tag."
+            echo
+            echo "| | version |"
+            echo "|---|---|"
+            echo "| \`Dockerfile\` pin | \`$PINNED\` |"
+            echo "| npm \`$TAG\` | \`$PUBLISHED\` |"
+            echo
+            echo "### Releases skipped"
+            echo
+            cat /tmp/between.md
+            echo
+            echo "### What this PR changes"
+            echo
+            echo "1. \`Dockerfile\` — the pinned dsh version."
+            echo "2. \`plugins/*/package.json\` — the \`@deepseek-ai/dsh-*\` peer ranges, which must move with the pin."
+            echo
+            echo "### Verify before merging"
+            echo
+            echo "- [ ] \`patches/trusted-config-plane.mjs\` and \`patches/client-loopback-settings.mjs\` still match the upstream"
+            echo "      layout. They are designed to fail the image build loudly if not — that failure is the intended signal,"
+            echo "      not a reason to weaken them."
+            echo "- [ ] Plugin client bundles are re-patched. \`plugins/dsh-*/install.mjs\` gates on the *plugin's own* version"
+            echo "      marker in the profile, so a dsh bump alone prints \"already installed\" and skips re-applying"
+            echo "      \`dsh.bundle.patch\`. Bump the affected plugin versions, or delete the \`.dsh-*.installed\` markers on"
+            echo "      the \`/data\` volume, so the patches are re-applied against the new client bundle."
+            echo "- [ ] Web UI loads over the tailnet FQDN, and the settings/credentials cards work (the patched config plane)."
+            echo "- [ ] Existing sessions resume, and the four plugins still mount."
+            echo
+            echo "Details: [\`@deepseek-ai/dsh\` on npm](https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions) · \`README.md\` § Updating"
+          } > /tmp/pr-body.md
+
+          git push --force origin "$BRANCH"
+
+          if gh pr view "$BRANCH" --json number >/dev/null 2>&1; then
+            gh pr edit "$BRANCH" --body-file /tmp/pr-body.md
+            echo "refreshed the existing PR for $BRANCH"
+          else
+            if ! gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title "chore(deps): bump @deepseek-ai/dsh to $PUBLISHED" \
+              --body-file /tmp/pr-body.md; then
+              echo "::error::branch $BRANCH was pushed, but opening the PR failed. If the error says GitHub Actions is not permitted to create pull requests, enable Settings -> Actions -> General -> Workflow permissions -> 'Allow GitHub Actions to create and approve pull requests', or open the PR from $BRANCH manually."
+              exit 1
+            fi
+            echo "opened a PR for $BRANCH"
+          fi
