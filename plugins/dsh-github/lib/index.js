@@ -356,6 +356,14 @@ async function removeWorktreeForSession(exec, scope, args) {
 		throw new Error(`github: refusing to remove '${worktreePath}' — not a worktree in this session's container`);
 	}
 	await removeWorktree({ worktreePath });
+	// Drop the container once its last worktree is gone, so removing every
+	// worktree by hand leaves nothing behind (archive cleanup does the same).
+	try {
+		const rest = await readdir(container);
+		if (rest.length === 0) await rm(container, { recursive: true, force: true });
+	} catch {
+		// The container was already gone.
+	}
 	return { removed: true, worktreePath };
 }
 
@@ -473,6 +481,46 @@ async function startupPrune(ctx, scope) {
 			ctx.logger?.info(`github: pruned orphaned worktrees for absent session ${entry.name}`);
 		}
 	}
+}
+
+/**
+ * The worktree workflow, contributed to the GLOBAL system prompt so every
+ * session knows to give each issue its own worktree without being asked. The
+ * tools alone only say what they do; this says WHEN to reach for them.
+ */
+const WORKTREE_GUIDANCE = [
+	"## Git worktrees for multi-issue work",
+	"",
+	"You can work several issues on one repository in parallel using git worktrees — inside this session, without starting a new session.",
+	"",
+	"When a task covers more than one independent piece of work on the same repository (several issues, or a group of parallel changes), give each piece its own worktree:",
+	"",
+	"- `github_create_worktree` with `name` (e.g. the issue id) creates a tree inside this session's workspace and returns its path. It starts from `origin/main` unless you pass `branch`.",
+	"- Do that issue's work only in that path: pass it as `workdir` to bash, and use absolute paths under it for file edits.",
+	"- To work issues concurrently, delegate each to a subagent and give it that worktree path as its `workdir`.",
+	"- `github_list_worktrees` lists this session's worktrees; `github_remove_worktree` removes one and discards its uncommitted changes.",
+	"- Keep the main checkout clean — do not commit issue work there. This session's worktrees are removed when the session is archived."
+].join("\n");
+
+/**
+ * Contribute the worktree workflow as a global prompt section. Registered from
+ * the plugin's (host-composition) scope, so it is a GLOBAL section that shadows
+ * nothing and applies to every session of every preset. The text is a provider
+ * so the section follows the live `worktreeEnabled` setting; an empty string
+ * contributes nothing (assembly drops empty sections).
+ */
+function registerWorktreeGuidance(ctx, scope) {
+	const systemPrompt = ctx.get("systemPrompt");
+	if (!systemPrompt || typeof systemPrompt.section !== "function") {
+		ctx.logger?.warn("github: systemPrompt unavailable — worktree guidance not contributed");
+		return;
+	}
+	// Order 100–199 is the harness convention for tool guidance.
+	ctx.effect(() => systemPrompt.section({
+		name: "github.worktrees",
+		order: 150,
+		text: () => (wtConfig(scope).enabled ? WORKTREE_GUIDANCE : "")
+	}));
 }
 
 /**
@@ -654,6 +702,7 @@ function apply(ctx, config) {
 	const scope = ctx.settings.register("github", Config, { base: config });
 	registerHandlers(ctx, scope);
 	registerTools(ctx, scope);
+	registerWorktreeGuidance(ctx, scope);
 	wrapArchiveSession(ctx, scope);
 	startupPrune(ctx, scope).catch((error) => ctx.logger?.warn(`github: startup worktree prune failed: ${String(error?.message ?? error)}`));
 	// Provide the directoryPicker service (a browse capability backed by our fs

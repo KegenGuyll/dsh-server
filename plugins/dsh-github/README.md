@@ -93,9 +93,10 @@ when it is a **linked worktree** (its `.git` is a file) *inside the archiving
 session's own container*. Cleanup never consults the live settings, so changing
 `worktreeDir` cannot strand an existing tree, and no other session's worktree can
 match. Containers are removed when their session is archived
-(`worktreeCleanupOnArchive`), and `worktreePruneOnStartup` removes containers
-whose session no longer exists (younger than two minutes are left alone, and the
-pass is skipped entirely if the session list is unreadable).
+(`worktreeCleanupOnArchive`), removing the last worktree by tool drops the
+now-empty container, and `worktreePruneOnStartup` removes containers whose
+session no longer exists (younger than two minutes are left alone, and the pass is
+skipped entirely if the session list is unreadable).
 
 Creates are serialized per session container (so the `worktreeMaxPerSession`
 count and the create cannot race), and `removeWorktree` verifies the directory is
@@ -153,6 +154,24 @@ Because a worktree is just a subdirectory of the session workspace, the same
 agent (or several subagents, each given a different worktree path as `workdir`)
 can work the issues concurrently without leaving the session. Worktrees are not
 registered as DSH workspaces and never become separate sessions.
+
+### Prompt contribution
+
+The tool schemas say what the worktree tools *do*; they do not say *when* to reach
+for them. The host therefore contributes one **global** system-prompt section
+(`ctx.systemPrompt.section`, name `github.worktrees`, order `150` — the harness's
+100–199 band for tool guidance) describing the multi-issue workflow. Registering
+from the plugin's host-composition scope makes it global, so it applies to every
+session of every agent preset without any user file or per-workspace `AGENTS.md`.
+
+The section's `text` is a provider, not a constant: it returns the guidance only
+while `worktreeEnabled` is true and an empty string otherwise (assembly drops
+empty sections), so turning worktrees off also stops the prompt from advertising
+them. It is disposed with the plugin fiber.
+
+This is guidance, not enforcement — it reliably shapes behaviour, but the agent
+still decides per task. Hard-coding "always create a worktree" was the first
+design and was removed deliberately.
 
 ## Composition
 
