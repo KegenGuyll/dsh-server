@@ -532,7 +532,7 @@ function registerTools(ctx, scope) {
 		description:
 			"Remove a Git worktree created by this plugin and unregister its DSH workspace. " +
 			"Pass its `worktreeWorkspaceId` (from github_create_worktree) or its absolute `worktreePath`. " +
-			"Only worktrees under the configured worktree root can be removed.",
+			"Only plugin-managed worktrees (a linked worktree whose directory is named after its session) can be removed.",
 		parameters: {
 			type: "object",
 			properties: {
