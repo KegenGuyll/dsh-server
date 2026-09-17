@@ -39,21 +39,22 @@ plugins/dsh-notify/            out-of-tree ntfy push on task-complete / needs-in
 ## dsh-github plugin
 
 The image ships an out-of-tree plugin, `dsh-github`, that turns the workspace
-"Add workspace…" control into a two-option chooser and adds per-session
-worktree isolation:
+"Add workspace…" control into a two-option chooser and adds **in-session
+worktrees**:
 
 - **Add local workspace** — delegates to the directory-picker backend, exactly
   as before.
 - **Import from GitHub** — a modal that lists your repositories (with a search
   filter and pagination); clicking **Import** on a repo clones it into the
   workspace root and registers it as a real workspace.
-- **Worktree sessions** — each new session created in a git-backed workspace
-  runs in its own fresh git worktree (the worktree path becomes the session's
-  workspace/cwd), and the worktree is removed when the session is archived. The
-  agent also has `github_create_worktree` / `github_list_worktrees` /
-  `github_remove_worktree` tools. Everything is configurable under the GitHub
-  settings card (enable/disable, worktree root, base branch, cleanup on archive,
-  per-repo cap, and more).
+- **In-session worktrees** — the agent creates git worktrees *inside the session's
+  own workspace* with `github_create_worktree` / `github_list_worktrees` /
+  `github_remove_worktree`, so one session can work several issues on the same
+  repo in parallel (sequentially or via subagents) without starting a new
+  session. Worktrees are git-excluded, and a session's worktrees are removed when
+  it is archived. Everything is configurable under the GitHub settings card
+  (enable/disable, worktree directory, base branch, cleanup on archive, per-session
+  cap, and more).
 
 A **GitHub** card appears under **Settings → Plugins → Plugin configuration**
 where you paste a personal access token (written to the credentials domain, so

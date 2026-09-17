@@ -10,7 +10,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, writeFile, stat, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, stat, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -18,11 +18,12 @@ import {
 	isGitRepo,
 	isLinkedWorktree,
 	isSessionDirName,
-	isManagedWorktree,
+	isWorktreeUnder,
 	isWithin,
 	resolveDefaultBranch,
 	createWorktree,
 	listWorktrees,
+	ensureExcluded,
 	removeWorktree
 } from "../lib/worktree.js";
 
@@ -100,21 +101,29 @@ test("resolve default branch", async (t) => {
 
 test("worktree create / list / detect / remove round-trip", async (t) => {
 	if (!hasGit) return t.skip("git unavailable");
-	// Plugin worktrees are named exactly after their session; ownership depends on it.
+	// A session's worktrees live in its own container: <workspace>/<dir>/<sessionId>/<name>.
 	const sessionId = "session-" + Date.now();
-	worktree = join(tmpdir(), sessionId);
+	const container = join(repo, ".dsh-worktrees", sessionId);
+	worktree = join(container, "issue-123");
 	await createWorktree({ repoPath: repo, dest: worktree, ref: "main", detach: true });
 
 	// The linked worktree is a git repo with a .git FILE, not a directory.
 	assert.equal(await isGitRepo(worktree), true);
 	assert.equal(await isLinkedWorktree(worktree), true);
 
-	// Ownership: exact session-name match, and the generic (unnamed) form.
-	assert.equal(await isManagedWorktree(worktree, sessionId), true);
-	assert.equal(await isManagedWorktree(worktree), true);
-	assert.equal(await isManagedWorktree(worktree, "session-other"), false);
-	// The main checkout is not a linked worktree, so it is never "managed".
-	assert.equal(await isManagedWorktree(repo), false);
+	// Ownership: a linked worktree inside its own container, and nothing else.
+	assert.equal(await isWorktreeUnder(container, worktree), true);
+	assert.equal(await isWorktreeUnder(repo, worktree), true);
+	assert.equal(await isWorktreeUnder(join(repo, ".dsh-worktrees", "session-other"), worktree), false);
+	// The main checkout is not a linked worktree.
+	assert.equal(await isWorktreeUnder(repo, repo), false);
+
+	// The container can be kept out of `git status` locally, idempotently.
+	const excludePath = await ensureExcluded(repo, ".dsh-worktrees/");
+	await ensureExcluded(repo, ".dsh-worktrees/");
+	const excluded = await readFile(excludePath, "utf8");
+	assert.equal(excluded.split("\n").filter((line) => line.trim() === ".dsh-worktrees/").length, 1);
+	assert.equal(excludePath.includes(join(".git", "info", "exclude")), true);
 
 	// It appears in the repository's worktree list (detached HEAD).
 	const list = await listWorktrees(repo);

@@ -4,8 +4,8 @@ An out-of-tree DeepSeek Harness plugin (dual-face: host + browser) that turns th
 workspace "Add workspace…" flow into a two-option chooser, registers a
 collapsible settings card under **Settings → Plugins → Plugin configuration**
 for the PAT (a write-only status/token control), the clone root, the
-shallow-clone flag, and per-session **worktree isolation** — staged behind a
-Save/Discard footer like the shipped plugin cards.
+shallow-clone flag, and **in-session worktrees** — staged behind a Save/Discard
+footer like the shipped plugin cards.
 
 - **Add local workspace** — a self-contained compact directory dialog (navigate
   the host filesystem, create a folder) over this plugin's own host handlers.
@@ -14,13 +14,12 @@ Save/Discard footer like the shipped plugin cards.
   `cloneRoot` and registers it as a workspace. The clone path is handed to the
   workspace-flow owner's normal adoption, so registration/selection works exactly
   like a local pick.
-- **Worktree sessions** — each new session created in a git-backed workspace runs
-  in its own fresh git worktree, and that worktree path becomes the session's
-  workspace/cwd, so the LLM's file/bash tools operate inside an isolated copy of
-  the repo. When the session is **archived** the worktree (and its workspace row)
-  is removed. The agent also gets `github_create_worktree` /
-  `github_list_worktrees` / `github_remove_worktree` tools to create and manage
-  worktrees (each registered as a DSH workspace).
+- **In-session worktrees** — the agent can create git worktrees **inside the
+  session's own workspace** via `github_create_worktree` /
+  `github_list_worktrees` / `github_remove_worktree`, so one session can work
+  several issues on the same repository in parallel (sequentially, or via
+  subagents each pointed at its own tree) **without starting a new session**.
+  Worktrees are removed when the session is archived.
 
 **Option B:** the plugin owns the local pick too, so it is fully self-contained —
 it does not depend on the harness directory-picker backend, and its bundle patch
@@ -38,8 +37,8 @@ so it never reaches the browser and edits take effect without a restart.
 package.json    manifest + dsh.client declaration
 lib/index.js    host plugin: settings namespace, client→host handlers, worktree tools + archive cleanup
 lib/github.js   GitHub REST client, PAT resolution, repo listing, clone+register
-lib/worktree.js git worktree helpers (create/list/remove/prune, branch + .git detection)
-lib/client.js   browser half (lazy-CJS factory): chooser, GitHub modal, settings card, New Session wrap
+lib/worktree.js git worktree helpers (create/list/remove/prune, branch + .git detection, git exclude)
+lib/client.js   browser half (lazy-CJS factory): chooser, GitHub modal, settings card
 install.mjs     idempotent auto-install (called by the container entrypoint)
 ```
 
@@ -55,37 +54,52 @@ module system.
 | `tokenEnv` | `GITHUB_TOKEN` | credential-ref name holding the PAT |
 | `cloneRoot` | `process.cwd()` | directory imported repos are cloned under (`/workspaces` in Docker) |
 | `shallow` | `true` | `git clone --depth 1` |
-| `worktreeEnabled` | `true` | on New Session in a git-backed workspace, auto-create a per-session worktree |
-| `worktreeRoot` | `process.cwd()/.dsh-worktrees` | absolute directory worktrees are created under |
+| `worktreeEnabled` | `true` | allow the agent to create worktrees in a session |
+| `worktreeDir` | `.dsh-worktrees` | subdirectory of the session workspace that holds its worktrees |
 | `worktreeBranch` | `origin/main` | base ref new worktrees start from (tool calls may override) |
 | `worktreeDetached` | `true` | create worktrees at a detached HEAD; `false` starts a fresh `dsh/…` branch |
-| `worktreeCleanupOnArchive` | `true` | remove the worktree (and its workspace row) when its session is archived |
-| `worktreeMaxPerRepo` | `50` | cap concurrent worktrees per repo (`0` = unlimited) |
-| `worktreeKeepOnFailure` | `false` | keep the worktree if session creation fails afterward (debugging) |
-| `worktreePruneOnStartup` | `true` | `git worktree prune` + drop orphaned worktree workspace rows on startup |
+| `worktreeCleanupOnArchive` | `true` | remove the session's worktrees when it is archived |
+| `worktreeMaxPerSession` | `8` | cap concurrent worktrees in one session (`0` = unlimited) |
+| `worktreePruneOnStartup` | `true` | on startup, drop worktree containers whose session no longer exists |
 
-All worktree options are read live per operation (no restart). Non-git
-workspaces and `worktreeEnabled=false` skip worktree handling entirely.
+All worktree options are read live per operation (no restart).
 
-### Worktree path
+### Why worktrees live inside the session workspace
 
-A session's worktree lives at `<worktreeRoot>/<repo-slug>/<sessionId>`, for
-example `/workspaces/.dsh-worktrees/core-api/session-7a3f0c1e-…`. The `sessionId`
-is pre-allocated on the host before the worktree is created, so the path is
-human-readable and exactly determinable from the session id for cleanup (no
-durable manifest needed).
+The file sandbox's writable root is derived from the session `cwd`
+(`sandboxPolicy.resolve()` → `resolveWorkspaceRoot(session.header.cwd)`), so a
+worktree placed anywhere else could not be read or written by the agent's own
+tools. Worktrees are therefore created at:
 
-The session id in that directory name is also the plugin's **ownership signal**:
-a path is treated as plugin-managed only when it is a linked worktree *and* its
-directory is named after a session. Cleanup therefore does not consult the live
-`worktreeRoot`, so changing that setting never strands worktrees created under an
-earlier root (they remain removable by `github_remove_worktree`).
+```
+<session workspace>/<worktreeDir>/<sessionId>/<name>
+```
 
-Worktree provisioning is per-repo serialized (the `worktreeMaxPerRepo` count and
-the create happen under one lock), a failed workspace registration rolls the new
-worktree back, and `worktreePruneOnStartup` also removes a worktree whose
-pre-allocated session never materialized (for example the browser closed between
-the `create-worktree` RPC and the session create).
+for example `/workspaces/core-api/.dsh-worktrees/session-7a3f0c1e-…/issue-123`.
+
+Because they are ordinary subdirectories of the session workspace, the agent
+reaches them with normal relative paths or by passing the returned path as
+`bash`'s `workdir`. The container is added to the repository's **local** exclude
+(`.git/info/exclude`) so it never shows up as untracked — nothing is written to a
+committed `.gitignore`.
+
+Worktrees are deliberately **not** registered as DSH workspaces: that is what
+previously turned each one into a separate session and sidebar entry.
+
+### Ownership and cleanup
+
+The `<sessionId>` directory name is the ownership signal: a path is only removed
+when it is a **linked worktree** (its `.git` is a file) *inside the archiving
+session's own container*. Cleanup never consults the live settings, so changing
+`worktreeDir` cannot strand an existing tree, and no other session's worktree can
+match. Containers are removed when their session is archived
+(`worktreeCleanupOnArchive`), and `worktreePruneOnStartup` removes containers
+whose session no longer exists (younger than two minutes are left alone, and the
+pass is skipped entirely if the session list is unreadable).
+
+Creates are serialized per session container (so the `worktreeMaxPerSession`
+count and the create cannot race), and `removeWorktree` verifies the directory is
+actually gone before reporting success.
 
 ## Client → host channel
 
@@ -115,28 +129,30 @@ Methods:
 - `github/status` → `{ configured }`
 - `github/set-token` `{ value }` → writes the credential ref
 - `github/clear-token` → removes the credential ref
-- `github/workspace-info` `{ workspaceId }` → `{ isGitRepo, worktreeEnabled, repoPath, defaultBranch, keepOnFailure }`
-- `github/create-worktree` `{ workspaceId, branch?, sessionId? }` → `{ worktreePath, worktreeWorkspaceId, sessionId, branch }`
-- `github/remove-worktree` `{ worktreeWorkspaceId? | worktreePath? }` → `{ removed, worktreePath }`
-- `github/list-worktrees` `{ repo? | repoPath? }` → `{ repoPath, worktrees }`
+
+Worktree operations are agent-facing tools only (below) — the browser has no
+worktree RPC, because worktree creation is never client-driven.
 
 ## Model tools
 
-The host registers three agent-facing tools via `ctx.tools.register`:
+The host registers three agent-facing tools via `ctx.tools.register`. All three
+run in the calling session's own workspace, so one session can carry several
+issues at once:
 
-- `github_create_worktree` `{ repo?, branch? }` — create a worktree (default
-  ref `origin/main`) and register its workspace; `repo` may be a workspace id or
-  an absolute path and defaults to the current session workspace.
-- `github_list_worktrees` `{ repo? }` — list a repo's worktrees (path, branch/HEAD,
-  whether each is plugin-managed).
-- `github_remove_worktree` `{ worktreeWorkspaceId | worktreePath }` — remove a
-  worktree and unregister its workspace (only plugin-managed, session-named
-  worktrees).
+- `github_create_worktree` `{ name, branch?, repo? }` — create a worktree at
+  `<session workspace>/<worktreeDir>/<sessionId>/<name>` on the configured base
+  ref (default `origin/main`) and return its path (pass it as `bash`'s `workdir`).
+  `repo` may be a workspace id or a path and defaults to the session workspace.
+- `github_list_worktrees` `{ repo? }` — list the worktrees **this session** has
+  created (name, path, branch/HEAD).
+- `github_remove_worktree` `{ name | path }` — remove one of this session's
+  worktrees. Only worktrees inside the session's own container qualify;
+  uncommitted changes are discarded.
 
-These are a higher-level, consistent interface over `git worktree`: they also
-register/remove the DSH workspace, so a session can be opened in a created
-worktree. (In a worktree session the agent's own `cwd` is already a worktree, so
-these tools are mainly for branching extra worktrees, e.g. off a feature branch.)
+Because a worktree is just a subdirectory of the session workspace, the same
+agent (or several subagents, each given a different worktree path as `workdir`)
+can work the issues concurrently without leaving the session. Worktrees are not
+registered as DSH workspaces and never become separate sessions.
 
 ## Composition
 
@@ -148,12 +164,11 @@ it inserts the `github` row and disables the harness `directory-picker` row so
 that client flow does not collide in those holes. Directory selection is
 provided entirely by the plugin (`github/local-list` / `github/local-create`).
 
-The New Session action is wrapped on the client (`ctx.workspaces.startSession`)
-so a git-backed, worktree-enabled workspace routes into `github/create-worktree`
-plus a normal session create against the new worktree workspace; `connectWorkspace`
-is left untouched so the page-load initial-selection path never spawns a
-worktree. The host wraps `workspaceRegistry.archiveSession` so archiving a
-worktree-backed session also removes its worktree.
+The client half takes no part in worktrees beyond the settings card: the harness
+`startSession` action is deliberately **not** wrapped, so a New Session behaves
+exactly as before and never spawns a worktree. The host wraps
+`workspaceRegistry.archiveSession` so archiving a session removes the worktrees it
+created.
 
 ## Installation
 
@@ -175,9 +190,9 @@ unchanged boot is a no-op. It does not hand-edit the profile's
 
 The host logic (`lib/github.js`, `lib/worktree.js`) is smoke-tested (stubbed
 `fetch` / `git` subprocess: listing, metadata, error mapping, worktree
-create/list/remove, branch and `.git`-file detection). All files pass
-`node --check`. Because this is an out-of-tree plugin with a browser half, the
-following need a live harness run and cannot be fully confirmed by static
+create/list/remove, branch and `.git`-file detection, git exclude). All files
+pass `node --check`. Because this is an out-of-tree plugin with a browser half,
+the following need a live harness run and cannot be fully confirmed by static
 inspection:
 
 - peer-dependency resolution of the `@deepseek-ai/dsh-*` framework packages from
@@ -187,5 +202,6 @@ inspection:
   live server, since remote browsers keep the settings plane loopback-only;
 - the directory-flow owner-props contract (the chooser receives `open`/`busy`/
   `onPicked`/`onCancel`/`onError` plus the injected action props);
-- the New Session worktree wrap and archive cleanup against a real repository
-  (`git worktree add`/`remove` behavior, settings toggles, tool visibility).
+- the worktree tools in a live session: that a created worktree is writable by
+  the agent's own sandboxed tools, and that archive cleanup removes the
+  session's container against a real repository.
