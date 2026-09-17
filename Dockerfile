@@ -14,7 +14,7 @@ FROM node:22-slim
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
-  && npm install -g @deepseek-ai/dsh@0.1.1-rc.2 \
+  && npm install -g @deepseek-ai/dsh@0.1.5-rc.2 \
   && npm install -g pnpm
 
 # Loosen the settings/credentials configuration plane so it honors --trusted-host
