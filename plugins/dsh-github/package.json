@@ -1,6 +1,6 @@
 {
   "name": "dsh-github",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "DeepSeek Harness plugin: add an 'Import from GitHub' option to the Add-workspace flow, clone/register GitHub repos as DSH workspaces via a personal access token, and let one session work several issues in parallel using git worktrees inside its own workspace.",
   "type": "module",
   "main": "lib/index.js",

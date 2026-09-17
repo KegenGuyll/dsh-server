@@ -110,20 +110,31 @@ service methods below. `lib/index.js` declares the handlers; `lib/client.js`
 invokes them and receives serializable results. Because the browser must never
 hold the PAT, this is the one unavoidable host round trip.
 
-The handlers are registered on the generic Connection RPC channel
-(`ctx.connection.rpc` with `authority: 'trusted-host'`) and invoked from the
-browser with `rpc.call('/github', method, args)` — the durable transport that
-works over the tailnet, unlike the loopback-only settings RPCs. A generated
+The handlers are served by an exact Fetch route this plugin registers on the
+shared `/api` channel (`ctx.connection.fetch.register`, path `/api/github`), and
+invoked from the browser with a plain `fetch('/api/github', …)` carrying
+`{ method, args }`. Riding `/api` means the call inherits the server's own fence
+— trusted Host/Origin plus the signed browser session — exactly as the shipped
+Remote plane does, so it works over the tailnet with no extra policy. A generated
 Remote is an alternative but requires the harness typert/cordis codegen step,
-which is not runnable from this thin-wrapper repo; the generic RPC channel
-avoids that.
+which is not runnable from this thin-wrapper repo.
 
-The channel is namespaced to this plugin (`/github`): each `connection.rpc`
-channel registers a distinct physical prefix route, so two plugins must not
-share a channel name. dsh-notify owns `/notify`; a per-plugin channel is what
-prevents the `duplicate prefix route` plugin-load failure.
+`ctx.connection.rpc.handle('/github', …)` would be the obvious transport, but on
+dsh 0.1.5-rc.2 it cannot register a route from an out-of-tree plugin. It mounts
+its route through the *service's own* shadowed context
+(`owner.effect(() => owner.webServer.register(route))`), and that context's fiber
+chain no longer injects `webServer` — 0.1.1 declared `inject: ["webServer"]` on the
+connection plugin, 0.1.5 moved it into an optional nested inject. The resulting
+`cannot get property "webServer" without inject` is thrown inside `ctx.effect`,
+which records it instead of failing the plugin tree, so the channel silently never
+registers; when `connection` happens to be up already as the entry applies, the
+same throw escapes `apply` and fails the whole tree (the boot crash this transport
+replaced). An exact Fetch route needs only `connection`.
 
-Methods:
+The path is namespaced per plugin (`/api/github`; dsh-notify owns `/api/notify`):
+exact routes are keyed by pathname, and a duplicate path fails the load loudly.
+
+Methods (all POSTed to `/api/github` as `{ method, args }`):
 - `github/list-user-repos` `{ page, perPage }` → `{ items, hasMore }`
 - `github/import` `{ repo, branch?, shallow? }` → `{ path, title, workspaceId }`
 - `github/local-list` `{ path? }` → `{ path, entries, hasParent }`
@@ -133,7 +144,7 @@ Methods:
 - `github/clear-token` → removes the credential ref
 
 Worktree operations are agent-facing tools only (below) — the browser has no
-worktree RPC, because worktree creation is never client-driven.
+worktree call, because worktree creation is never client-driven.
 
 ## Model tools
 
@@ -257,9 +268,10 @@ inspection:
 
 - peer-dependency resolution of the `@deepseek-ai/dsh-*` framework packages from
   the profile install;
-- the **client→host channel**: the generic Connection RPC (`rpc.call('/github', …)`)
-  must be reachable from the browser (authority `trusted-host`); confirm on a
-  live server, since remote browsers keep the settings plane loopback-only;
+- the **client→host channel**: the exact `/api/github` Fetch route
+  (`fetch('/api/github', { method: 'POST', body: JSON.stringify({ method, args }) })`)
+  must be reachable from the browser behind the `/api` fence; confirm on a live
+  server;
 - the directory-flow owner-props contract (the chooser receives `open`/`busy`/
   `onPicked`/`onCancel`/`onError` plus the injected action props);
 - the worktree tools in a live session: that a created worktree is writable by

@@ -14,7 +14,7 @@ out-of-tree plugins: an additive bundle (`dsh.bundle.patch`) auto-installed by
 ```
 lib/index.js      host half — settings namespace, ntfy sender, agent/status
                   (done + plan-review) detection, the `ping_user` tool, and the
-                  client→host RPC handlers
+                  client→host handlers (an exact `/api/notify` Fetch route)
 lib/ntfy.js       tiny ntfy publish client (global fetch on the host)
 lib/client.js     browser half — the Settings → Plugins → Notify card + page
                   visibility reporting (done-ping suppression)
@@ -96,6 +96,21 @@ disabled, the topic is unconfigured, or a send fails.
 | `titlePrefix` | `"DSH"` | Notification title prefix. |
 
 The ntfy access token is stored under the credential ref `NTFY_TOKEN` (host-only).
+
+## Client → host
+
+The Settings card and the page-visibility heartbeat reach the host through an
+exact Fetch route this plugin registers on the shared `/api` channel
+(`ctx.connection.fetch.register`, path `/api/notify`): `fetch('/api/notify', …)`
+with `{ method, args }` in and `{ ok, value }` / `{ ok, error }` out. Riding
+`/api` inherits the server's own fence (trusted Host/Origin plus the signed
+browser session). Methods: `notify/status`, `notify/get-config`,
+`notify/set-config`, `notify/set-token`, `notify/clear-token`, `notify/test`,
+`notify/visible`.
+
+`ctx.connection.rpc.handle('/notify', …)` would be the obvious transport, but it
+cannot register a route from an out-of-tree plugin on dsh 0.1.5-rc.2 — see the
+`dsh-github` README for the full diagnosis.
 
 ## Installation
 
