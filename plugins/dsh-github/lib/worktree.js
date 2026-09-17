@@ -68,6 +68,35 @@ async function isLinkedWorktree(path) {
 	}
 }
 
+/**
+ * The plugin names each worktree directory exactly after the session it backs,
+ * so the session id in the directory name is the positive ownership signal —
+ * stronger than Git's generic linked-worktree marker, and independent of the
+ * (live-editable) worktree root.
+ */
+const SESSION_DIR_NAME = /^session-[A-Za-z0-9-]+$/;
+
+/** Whether a directory basename is one of this plugin's session worktree names. */
+function isSessionDirName(name) {
+	return SESSION_DIR_NAME.test(String(name));
+}
+
+/**
+ * Whether `worktreePath` is a worktree created by this plugin. With `sessionId`
+ * the directory name must equal that session id exactly; without it, any
+ * session-named linked worktree counts. Requiring a linked worktree (`.git` is a
+ * file) means a plain directory can never be removed.
+ */
+async function isManagedWorktree(worktreePath, sessionId) {
+	const base = basename(String(worktreePath));
+	if (sessionId !== undefined) {
+		if (base !== String(sessionId)) return false;
+	} else if (!SESSION_DIR_NAME.test(base)) {
+		return false;
+	}
+	return await isLinkedWorktree(worktreePath);
+}
+
 /** Whether `child` is strictly inside `parent` (path-lexical; both absolute). */
 function isWithin(parent, child) {
 	const rel = relative(parent, child);
@@ -177,29 +206,53 @@ async function prune(repoPath) {
  * @returns the method used ("git" | "fs" | "pruned-only").
  */
 async function removeWorktree({ worktreePath, repoPath }) {
+	if (!worktreePath) throw new Error("removeWorktree: a worktreePath is required");
 	const source = repoPath ?? await baseRepoOf(worktreePath);
 	let method = "pruned-only";
 	if (source) {
+		let gitError;
 		try {
 			await runGit({ repoPath: source, args: ["worktree", "remove", "--force", worktreePath], timeoutMs: 60000 });
 			method = "git";
 		} catch (error) {
-			// Fall back to a filesystem remove (best-effort, still logs the git error upstream if it matters).
-			await rm(worktreePath, { recursive: true, force: true }).catch(() => {});
-			method = "fs";
+			gitError = error;
+		}
+		if (gitError) {
+			// Git refused (locked, busy, or partially removed). Try a filesystem
+			// remove; a failure there must propagate so the caller does NOT
+			// unregister a workspace whose directory is still on disk.
+			try {
+				await rm(worktreePath, { recursive: true, force: true });
+				method = "fs";
+			} catch (fsError) {
+				throw new Error(`failed to remove worktree '${worktreePath}': git: ${gitError.message}; fs: ${fsError.message}`);
+			}
 		}
 		await prune(source);
-	} else if (worktreePath) {
-		await rm(worktreePath, { recursive: true, force: true }).catch(() => {});
-		method = "fs";
+	} else {
+		try {
+			await rm(worktreePath, { recursive: true, force: true });
+			method = "fs";
+		} catch (fsError) {
+			throw new Error(`failed to remove worktree '${worktreePath}': ${fsError.message}`);
+		}
 	}
-	return method;
+	// Verify the directory is actually gone: a caller must never treat a still
+	// existing worktree as removed (it would delete the registration and leak it).
+	try {
+		await stat(worktreePath);
+	} catch {
+		return method;
+	}
+	throw new Error(`worktree '${worktreePath}' still exists after removal`);
 }
 
 export {
 	slug,
 	isGitRepo,
 	isLinkedWorktree,
+	isSessionDirName,
+	isManagedWorktree,
 	isWithin,
 	resolveDefaultBranch,
 	baseRepoOf,

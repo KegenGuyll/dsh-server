@@ -17,6 +17,8 @@ import {
 	slug,
 	isGitRepo,
 	isLinkedWorktree,
+	isSessionDirName,
+	isManagedWorktree,
 	isWithin,
 	resolveDefaultBranch,
 	createWorktree,
@@ -71,6 +73,14 @@ test("isWithin is lexically strict", () => {
 	assert.equal(isWithin("/a/b", "/x"), false);
 });
 
+test("session directory naming is the ownership signal", () => {
+	assert.equal(isSessionDirName("session-7a3f0c1e-9b2d-4f1a"), true);
+	assert.equal(isSessionDirName("session-abc"), true);
+	assert.equal(isSessionDirName("my-checkout"), false);
+	assert.equal(isSessionDirName("session-"), false);
+	assert.equal(isSessionDirName("session-abc/../evil"), false);
+});
+
 test("git repo detection", async (t) => {
 	if (!hasGit) return t.skip("git unavailable");
 	assert.equal(await isGitRepo(repo), true);
@@ -90,12 +100,21 @@ test("resolve default branch", async (t) => {
 
 test("worktree create / list / detect / remove round-trip", async (t) => {
 	if (!hasGit) return t.skip("git unavailable");
-	worktree = join(tmpdir(), "dsh-worktree-copy-" + Date.now());
+	// Plugin worktrees are named exactly after their session; ownership depends on it.
+	const sessionId = "session-" + Date.now();
+	worktree = join(tmpdir(), sessionId);
 	await createWorktree({ repoPath: repo, dest: worktree, ref: "main", detach: true });
 
 	// The linked worktree is a git repo with a .git FILE, not a directory.
 	assert.equal(await isGitRepo(worktree), true);
 	assert.equal(await isLinkedWorktree(worktree), true);
+
+	// Ownership: exact session-name match, and the generic (unnamed) form.
+	assert.equal(await isManagedWorktree(worktree, sessionId), true);
+	assert.equal(await isManagedWorktree(worktree), true);
+	assert.equal(await isManagedWorktree(worktree, "session-other"), false);
+	// The main checkout is not a linked worktree, so it is never "managed".
+	assert.equal(await isManagedWorktree(repo), false);
 
 	// It appears in the repository's worktree list (detached HEAD).
 	const list = await listWorktrees(repo);
@@ -108,4 +127,8 @@ test("worktree create / list / detect / remove round-trip", async (t) => {
 	await assert.rejects(stat(worktree), /ENOENT/);
 	const afterList = await listWorktrees(repo);
 	assert.equal(afterList.find((w) => w.path === worktree), undefined);
+});
+
+test("removeWorktree requires a path", async () => {
+	await assert.rejects(removeWorktree({}), /worktreePath is required/);
 });

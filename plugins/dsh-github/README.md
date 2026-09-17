@@ -75,6 +75,18 @@ is pre-allocated on the host before the worktree is created, so the path is
 human-readable and exactly determinable from the session id for cleanup (no
 durable manifest needed).
 
+The session id in that directory name is also the plugin's **ownership signal**:
+a path is treated as plugin-managed only when it is a linked worktree *and* its
+directory is named after a session. Cleanup therefore does not consult the live
+`worktreeRoot`, so changing that setting never strands worktrees created under an
+earlier root (they remain removable by `github_remove_worktree`).
+
+Worktree provisioning is per-repo serialized (the `worktreeMaxPerRepo` count and
+the create happen under one lock), a failed workspace registration rolls the new
+worktree back, and `worktreePruneOnStartup` also removes a worktree whose
+pre-allocated session never materialized (for example the browser closed between
+the `create-worktree` RPC and the session create).
+
 ## Client → host channel
 
 All GitHub work runs on the host; the browser reaches it through the host
@@ -112,13 +124,14 @@ Methods:
 
 The host registers three agent-facing tools via `ctx.tools.register`:
 
-- `github_create_worktree` `{ repo?, branch?, name? }` — create a worktree (default
+- `github_create_worktree` `{ repo?, branch? }` — create a worktree (default
   ref `origin/main`) and register its workspace; `repo` may be a workspace id or
   an absolute path and defaults to the current session workspace.
 - `github_list_worktrees` `{ repo? }` — list a repo's worktrees (path, branch/HEAD,
   whether each is plugin-managed).
 - `github_remove_worktree` `{ worktreeWorkspaceId | worktreePath }` — remove a
-  worktree and unregister its workspace (only worktrees under `worktreeRoot`).
+  worktree and unregister its workspace (only plugin-managed, session-named
+  worktrees).
 
 These are a higher-level, consistent interface over `git worktree`: they also
 register/remove the DSH workspace, so a session can be opened in a created

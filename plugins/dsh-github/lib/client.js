@@ -432,9 +432,10 @@ window.__ModuleLoader__.load({
 						return { checked: !!staged.checked, overridden: true, invalid: false };
 					}
 					const current = wtCurrent(this.value(), field);
+					const invalid = wtIsNumber(field) && staged !== undefined && !staged.clear && !Number.isFinite(Number(staged.text));
 					if (staged === undefined) return { text: String(current), overridden, invalid: false };
 					if (staged.clear) return { text: String(current), overridden: false, invalid: false };
-					return { text: staged.text, overridden: true, invalid: false };
+					return { text: staged.text, overridden: true, invalid };
 				}
 				const staged = this.staged.get(field);
 				if (field === "token") {
@@ -457,6 +458,18 @@ window.__ModuleLoader__.load({
 			editWorktreeText(field, text) { this.stage(field, { text, clear: false }); }
 			toggleWorktree(field, checked) { this.stage(field, { checked: !!checked, clear: false }); }
 			resetWorktree(field) { this.stage(field, { clear: true }); }
+
+			/**
+			 * Whether any staged edit is structurally unacceptable (a non-numeric
+			 * value in a number field). Such an edit must block the save rather than
+			 * be silently dropped by the write loop.
+			 */
+			isInvalid() {
+				for (const [field, staged] of this.staged) {
+					if (wtIsNumber(field) && !staged.clear && !Number.isFinite(Number(staged.text))) return true;
+				}
+				return false;
+			}
 
 			/** Whether a save would write anything (a non-blank token always counts). */
 			dirty() {
@@ -509,6 +522,10 @@ window.__ModuleLoader__.load({
 			/** Write every staged edit, then re-seed from what the Host accepted. */
 			async save() {
 				if (!this.scope || this.saving) return;
+				// An invalid edit (non-numeric number field) must block the save: the
+				// write loop would emit nothing for it and clearing `staged` would
+				// silently discard the user's input as if it had been saved.
+				if (this.isInvalid()) return;
 				const writes = [];
 				for (const [field, staged] of this.staged) {
 					if (field === "token") {
@@ -564,6 +581,7 @@ window.__ModuleLoader__.load({
 					available: this.available(),
 					writable: this.writable(),
 					dirty: this.dirty(),
+					invalid: this.isInvalid(),
 					saving: this.saving,
 					failed: this.failed,
 					cloneRoot: this.field("cloneRoot"),
@@ -641,7 +659,7 @@ window.__ModuleLoader__.load({
 			if (!state.available) return null;
 
 			const resettable = state.writable && !state.saving;
-			const blocked = !state.dirty || state.saving;
+			const blocked = !state.dirty || state.saving || state.invalid;
 
 			return React.createElement("li", { className: "dsh-github-card" + (open ? " dsh-github-cardOpen" : "") },
 				React.createElement("button", {
@@ -716,6 +734,7 @@ window.__ModuleLoader__.load({
 					renderWorktreeField(controller, state, "worktreeKeepOnFailure", "Keep on failure", "Keep the worktree if session creation fails afterward (debugging).", "bool"),
 					renderWorktreeField(controller, state, "worktreePruneOnStartup", "Prune on startup", "Run `git worktree prune` and drop orphaned worktree workspace rows on startup.", "bool"),
 					React.createElement("div", { className: "dsh-github-card-footer" },
+						state.invalid ? React.createElement("p", { className: "dsh-github-card-failed", role: "status" }, "A worktree number must be a valid number before saving.") : null,
 						state.failed ? React.createElement("p", { className: "dsh-github-card-failed", role: "status" }, "The deployment did not accept these values; they were left for you to correct.") : null,
 						state.tokenConfigured ? React.createElement("button", { type: "button", className: "dsh-github-card-discard", disabled: !resettable, onClick: () => controller.clearTokenAction() }, "Clear token") : null,
 						React.createElement("button", { type: "button", className: "dsh-github-card-discard", disabled: !state.dirty || state.saving, onClick: () => controller.discard() }, "Discard"),
