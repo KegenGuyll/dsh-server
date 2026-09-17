@@ -97,6 +97,17 @@ async function isWorktreeUnder(root, path) {
 }
 
 /**
+ * Whether an edit target requires a worktree first: it lies inside the session's
+ * main checkout (`repoPath`) but not inside that session's own worktree
+ * container. A target outside the repository entirely is never our business, and
+ * a target already inside the container is exactly what we want.
+ */
+function editNeedsWorktree({ target, repoPath, container }) {
+	if (!isWithin(repoPath, target)) return false;
+	return !isWithin(container, target);
+}
+
+/**
  * Resolve the repository's default branch: `origin/HEAD`, then the current
  * HEAD, then `main`. Returns a bare branch name (e.g. `main`).
  */
@@ -270,6 +281,7 @@ export {
 	isLinkedWorktree,
 	isSessionDirName,
 	isWorktreeUnder,
+	editNeedsWorktree,
 	isWithin,
 	resolveDefaultBranch,
 	baseRepoOf,

@@ -59,6 +59,7 @@ module system.
 | `worktreeBranch` | `origin/main` | base ref new worktrees start from (tool calls may override) |
 | `worktreeDetached` | `true` | create worktrees at a detached HEAD; `false` starts a fresh `dsh/…` branch |
 | `worktreeCleanupOnArchive` | `true` | remove the session's worktrees when it is archived |
+| `worktreeRequireForEdits` | `true` | **enforce** it: deny `write`/`edit` calls targeting the main checkout until a worktree exists |
 | `worktreeMaxPerSession` | `8` | cap concurrent worktrees in one session (`0` = unlimited) |
 | `worktreePruneOnStartup` | `true` | on startup, drop worktree containers whose session no longer exists |
 
@@ -155,23 +156,63 @@ agent (or several subagents, each given a different worktree path as `workdir`)
 can work the issues concurrently without leaving the session. Worktrees are not
 registered as DSH workspaces and never become separate sessions.
 
+### Requirement and enforcement
+
+The requirement has two layers, because a prompt alone asks rather than requires.
+
+**1. The prompt states it as a precondition.** With `worktreeRequireForEdits` on
+(default), the contributed section is the *required* variant: it tells the agent
+that a worktree must exist before its first write or edit in the repository, that
+the main checkout is shared, and that a denial names the worktree step. With the
+setting off, the same section becomes the advisory variant ("when a task covers
+more than one independent piece of work…").
+
+**2. The host denies violating calls.** The plugin registers a
+`tools/pre-execute` gate (`registerWorktreeEditGuard`) that rejects a `write` or
+`edit` whose target is inside the calling session's main checkout but outside that
+session's own worktree container:
+
+```js
+ctx.on("tools/pre-execute", async (exec, next) => {
+  const reason = await worktreeEditDenial(scope, exec);
+  if (reason !== undefined) return { kind: "deny", reason };
+  return next();
+});
+```
+
+The denial reason names the next step (call `github_create_worktree`, then edit
+inside the returned path), so the model sees an instruction rather than an opaque
+failure.
+
+The gate is deliberately narrow:
+
+- **Only `write` and `edit`.** These are the deterministic file-mutation tools.
+  `bash` cannot be classified reliably, so it is covered by the prompt alone —
+  a shell command that writes to the checkout is not blocked.
+- **Only inside the calling session's own repository.** A target outside the repo
+  (scratch files, `/tmp`, other trees) is never touched.
+- **Never for an already-isolated session.** If the session's own workspace is a
+  linked worktree (its `.git` is a file), nesting another worktree would be
+  nonsense, so the gate stands down.
+- **Never without a repository.** A non-git workspace has nothing to branch from,
+  so the gate allows everything.
+- **Fails open.** If the check itself throws, the call proceeds and the plugin
+  logs `worktree edit gate failed open` — an enforcement bug must not brick a
+  session.
+
 ### Prompt contribution
 
 The tool schemas say what the worktree tools *do*; they do not say *when* to reach
 for them. The host therefore contributes one **global** system-prompt section
 (`ctx.systemPrompt.section`, name `github.worktrees`, order `150` — the harness's
-100–199 band for tool guidance) describing the multi-issue workflow. Registering
-from the plugin's host-composition scope makes it global, so it applies to every
-session of every agent preset without any user file or per-workspace `AGENTS.md`.
+100–199 band for tool guidance). Registering from the plugin's host-composition
+scope makes it global, so it applies to every session of every agent preset
+without any user file or per-workspace `AGENTS.md`.
 
-The section's `text` is a provider, not a constant: it returns the guidance only
-while `worktreeEnabled` is true and an empty string otherwise (assembly drops
-empty sections), so turning worktrees off also stops the prompt from advertising
-them. It is disposed with the plugin fiber.
-
-This is guidance, not enforcement — it reliably shapes behaviour, but the agent
-still decides per task. Hard-coding "always create a worktree" was the first
-design and was removed deliberately.
+The section's `text` is a provider, not a constant: it picks the required or
+advisory variant from the live setting and returns an empty string when worktrees
+are disabled (assembly drops empty sections), so turning worktrees off also stops
+the prompt from advertising them. It is disposed with the plugin fiber.
 
 ## Composition
 
