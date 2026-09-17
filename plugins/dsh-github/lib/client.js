@@ -106,24 +106,27 @@ window.__ModuleLoader__.load({
 		injectStyles();
 
 		/** Required client services (Cordis fibre inject). */
-		const inject = ["slots", "workspaces", "sessions"];
+		const inject = ["slots"];
 
-		/** Worktree settings field names (flat, top-level keys on the `github` namespace). */
+		/**
+		 * Worktree settings field names (flat, top-level keys on the `github`
+		 * namespace). Worktrees are created by the agent inside the session's own
+		 * workspace — this card only configures them.
+		 */
 		var WORKTREE_FIELDS = [
-			"worktreeEnabled", "worktreeRoot", "worktreeBranch", "worktreeDetached",
-			"worktreeCleanupOnArchive", "worktreeMaxPerRepo", "worktreeKeepOnFailure",
-			"worktreePruneOnStartup"
+			"worktreeEnabled", "worktreeDir", "worktreeBranch", "worktreeDetached",
+			"worktreeCleanupOnArchive", "worktreeMaxPerSession", "worktreePruneOnStartup"
 		];
 		function wtIsBool(field) {
 			return field === "worktreeEnabled" || field === "worktreeDetached" || field === "worktreeCleanupOnArchive" ||
-				field === "worktreeKeepOnFailure" || field === "worktreePruneOnStartup";
+				field === "worktreePruneOnStartup";
 		}
-		function wtIsNumber(field) { return field === "worktreeMaxPerRepo"; }
-		function wtIsText(field) { return field === "worktreeRoot" || field === "worktreeBranch"; }
+		function wtIsNumber(field) { return field === "worktreeMaxPerSession"; }
+		function wtIsText(field) { return field === "worktreeDir" || field === "worktreeBranch"; }
 		function wtIsField(field) { return WORKTREE_FIELDS.indexOf(field) !== -1; }
 		function wtCurrent(value, field) {
 			if (wtIsBool(field)) return value[field] !== false; // schema default true
-			if (wtIsNumber(field)) return Number.isFinite(value[field]) ? value[field] : 50;
+			if (wtIsNumber(field)) return Number.isFinite(value[field]) ? value[field] : 8;
 			return value[field] || "";
 		}
 
@@ -589,12 +592,11 @@ window.__ModuleLoader__.load({
 					token: this.field("token"),
 					tokenConfigured: this.tokenConfigured,
 					worktreeEnabled: this.field("worktreeEnabled"),
-					worktreeRoot: this.field("worktreeRoot"),
+					worktreeDir: this.field("worktreeDir"),
 					worktreeBranch: this.field("worktreeBranch"),
 					worktreeDetached: this.field("worktreeDetached"),
 					worktreeCleanupOnArchive: this.field("worktreeCleanupOnArchive"),
-					worktreeMaxPerRepo: this.field("worktreeMaxPerRepo"),
-					worktreeKeepOnFailure: this.field("worktreeKeepOnFailure"),
+					worktreeMaxPerSession: this.field("worktreeMaxPerSession"),
 					worktreePruneOnStartup: this.field("worktreePruneOnStartup")
 				};
 			}
@@ -724,15 +726,14 @@ window.__ModuleLoader__.load({
 								onChange: (e) => controller.toggleShallow(e.target.checked)
 							}),
 							React.createElement("span", { className: "dsh-github-field-hint" }, "Clone with --depth 1 (full clone when off)"))),
-					React.createElement("p", { className: "dsh-github-worktrees-head" }, "Worktree isolation — each new session in a git-backed workspace runs in its own worktree, removed on archive:"),
-					renderWorktreeField(controller, state, "worktreeEnabled", "Auto worktrees per session", "Create a worktree (and a worktree workspace) for every New Session in a git-backed workspace.", "bool"),
-					renderWorktreeField(controller, state, "worktreeRoot", "Worktree root", "Absolute directory worktrees are created under.", "text"),
+					React.createElement("p", { className: "dsh-github-worktrees-head" }, "Worktrees — the agent creates git worktrees inside this session's own workspace to work several issues in parallel, without starting new sessions:"),
+					renderWorktreeField(controller, state, "worktreeEnabled", "Allow worktrees", "Let the agent create git worktrees inside this session's workspace, so several issues can be worked in parallel in one session.", "bool"),
+					renderWorktreeField(controller, state, "worktreeDir", "Worktree directory", "Subdirectory of the session workspace that holds its worktrees (kept out of git status via .git/info/exclude).", "text"),
 					renderWorktreeField(controller, state, "worktreeBranch", "Base branch", "Ref new worktrees start from (default origin/main); the agent can override per tool call.", "text"),
 					renderWorktreeField(controller, state, "worktreeDetached", "Detached HEAD", "Create worktrees at a detached HEAD; off starts a fresh `dsh/…` branch.", "bool"),
-					renderWorktreeField(controller, state, "worktreeCleanupOnArchive", "Remove on archive", "Remove the worktree (and its workspace row) when its session is archived.", "bool"),
-					renderWorktreeField(controller, state, "worktreeMaxPerRepo", "Max per repo", "Cap concurrent worktrees per repo (0 = unlimited).", "number"),
-					renderWorktreeField(controller, state, "worktreeKeepOnFailure", "Keep on failure", "Keep the worktree if session creation fails afterward (debugging).", "bool"),
-					renderWorktreeField(controller, state, "worktreePruneOnStartup", "Prune on startup", "Run `git worktree prune` and drop orphaned worktree workspace rows on startup.", "bool"),
+					renderWorktreeField(controller, state, "worktreeCleanupOnArchive", "Remove on archive", "Remove this session's worktrees when it is archived.", "bool"),
+					renderWorktreeField(controller, state, "worktreeMaxPerSession", "Max per session", "Cap concurrent worktrees in one session (0 = unlimited).", "number"),
+					renderWorktreeField(controller, state, "worktreePruneOnStartup", "Prune on startup", "On startup, drop worktree containers whose session no longer exists.", "bool"),
 					React.createElement("div", { className: "dsh-github-card-footer" },
 						state.invalid ? React.createElement("p", { className: "dsh-github-card-failed", role: "status" }, "A worktree number must be a valid number before saving.") : null,
 						state.failed ? React.createElement("p", { className: "dsh-github-card-failed", role: "status" }, "The deployment did not accept these values; they were left for you to correct.") : null,
@@ -743,65 +744,11 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
-		 * Wrap the shared New Session action so a session created in a
-		 * git-backed, worktree-enabled workspace lands in a fresh worktree. We wrap
-		 * `startSession` (not `connectWorkspace`) because the page-load initial
-		 * selection path calls `connectWorkspace` directly and must not spawn a
-		 * worktree on every load. The target resolution is replicated from the
-		 * original; for non-git or disabled workspaces it delegates straight to the
-		 * original implementation.
-		 */
-		function wrapStartSession(ctx) {
-			const ws = ctx.get("workspaces");
-			const sessions = ctx.get("sessions");
-			if (!ws || typeof ws.startSession !== "function" || !sessions || typeof sessions.create !== "function") {
-				console.warn("dsh-github: worktree New Session wrap skipped (workspaces/sessions runtime unavailable)");
-				return;
-			}
-			const original = ws.startSession.bind(ws);
-			ws.startSession = (workspaceId) => {
-				const list = ws.list.getSnapshot();
-				const current = sessions.list.getSnapshot().current;
-				const currentWorkspaceId = current === undefined ? undefined
-					: list.items.find((item) => item.sessionIds.includes(current))?.workspaceId;
-				const target = workspaceId ?? currentWorkspaceId ?? list.recentWorkspaceId;
-				if (target === undefined) { sessions.clear(); return; }
-				hostCall(ctx, "github/workspace-info", { workspaceId: target }).then((info) => {
-					if (!info || !info.isGitRepo || !info.worktreeEnabled) { original(workspaceId); return; }
-					hostCall(ctx, "github/create-worktree", { workspaceId: target })
-						.then((wt) => sessions.create({ workspaceId: wt.worktreeWorkspaceId, sessionId: wt.sessionId })
-							.then((sessionId) => sessions.open(sessionId))
-							.catch((err) => {
-								console.warn("dsh-github: worktree session create failed, falling back:", err);
-								if (!info.keepOnFailure && wt.worktreeWorkspaceId) {
-									hostCall(ctx, "github/remove-worktree", { worktreeWorkspaceId: wt.worktreeWorkspaceId }).catch(() => {});
-								}
-								original(workspaceId);
-							})
-						)
-						.catch((err) => {
-							console.warn("dsh-github: worktree create failed, falling back to a normal session:", err);
-							original(workspaceId);
-						});
-				}).catch((err) => {
-					console.warn("dsh-github: workspace-info failed, falling back:", err);
-					original(workspaceId);
-				});
-			};
-			// Undo the wrap on plugin stop/update so a later run starts from the
-			// original implementation rather than a nested wrapper.
-			const restore = () => { ws.startSession = original; };
-			if (typeof ctx.effect === "function") ctx.effect(restore);
-			else ctx.on?.("dispose", restore);
-		}
-
-		/**
 		 * Plugin body: register the chooser into both directory-flow holes (the
 		 * native occupant's two-hole pattern), the settings card, and the New
 		 * Session worktree wrap.
 		 */
 		function apply(ctx) {
-			wrapStartSession(ctx);
 			const injected = () => ({
 				localList: (args) => hostCall(ctx, "github/local-list", args),
 				localCreate: (args) => hostCall(ctx, "github/local-create", args),

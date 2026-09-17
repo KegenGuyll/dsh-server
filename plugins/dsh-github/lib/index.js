@@ -1,10 +1,11 @@
 /**
  * dsh-github host plugin: contributes a `github` settings namespace (token env
  * ref, clone root, shallow flag, worktree options) plus the client→host handlers
- * the browser half invokes to list the user's repositories, import a repo as a
- * workspace, and run per-session worktrees. It also registers three agent-facing
- * worktree tools and wraps `workspaceRegistry.archiveSession` so archiving a
- * worktree-backed session removes the worktree.
+ * the browser half invokes to list the user's repositories and import a repo as
+ * a workspace. It also registers three agent-facing worktree tools that create
+ * worktrees INSIDE the current session's workspace (so one session can work
+ * several issues in parallel) and wraps `workspaceRegistry.archiveSession` so
+ * archiving a session removes the worktrees it created.
  *
  * The client half addresses these methods through the generic Connection RPC
  * channel (`ctx.connection.rpc`, authority `trusted-host`), which works over the
@@ -12,21 +13,20 @@
  * each handler re-resolves the token per call.
  */
 
-import { randomUUID } from "node:crypto";
 import z from "@deepseek-ai/schemastery";
 import { join, dirname, isAbsolute, basename } from "node:path";
-import { readdir, mkdir, stat } from "node:fs/promises";
+import { readdir, mkdir, stat, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { listUserRepos, getRepo, gitClone, slug } from "./github.js";
 import {
 	isGitRepo,
-	isManagedWorktree,
 	isSessionDirName,
 	isWithin,
-	resolveDefaultBranch,
+	isWorktreeUnder,
 	createWorktree,
 	listWorktrees,
 	prune,
+	ensureExcluded,
 	removeWorktree
 } from "./worktree.js";
 
@@ -108,8 +108,13 @@ function resolveRefName(scope) {
 /** Default clone root = the process working directory (`/workspaces` in Docker). */
 const DEFAULT_CLONE_ROOT = process.cwd();
 
-/** Default worktree root: a `.dsh-worktrees` sibling under the process cwd (`/workspaces/.dsh-worktrees` in Docker). */
-const DEFAULT_WORKTREE_ROOT = join(process.cwd(), ".dsh-worktrees");
+/**
+ * Default worktree container: a subdirectory of the SESSION's own workspace.
+ * Worktrees must live inside the session workspace because the file sandbox's
+ * writable root is the session `cwd` — anything outside it is unusable by the
+ * agent's own tools.
+ */
+const DEFAULT_WORKTREE_DIR = ".dsh-worktrees";
 
 /** Cordis plugin name used by loader diagnostics. */
 const name = "github";
@@ -117,7 +122,7 @@ const name = "github";
 /** Services the host half requires. */
 const inject = ["workspaceRegistry", "credentials", "settings"];
 
-/** Deployment/user configuration: a credential reference, a clone root, shallow. */
+/** Deployment/user configuration: a credential reference, a clone root, shallow, worktrees. */
 const Config = z.object({
 	/** Env-variable (credential ref) name that holds the GitHub PAT. */
 	tokenEnv: z.string().default("GITHUB_TOKEN"),
@@ -125,41 +130,41 @@ const Config = z.object({
 	cloneRoot: z.string().default(DEFAULT_CLONE_ROOT),
 	/** Clone with --depth 1 (full clone when false). */
 	shallow: z.boolean().default(true),
-	/** Master toggle: on New Session in a git-backed workspace, auto-create a per-session worktree. */
+	/** Master toggle: allow the agent to create worktrees in this session. */
 	worktreeEnabled: z.boolean().default(true),
-	/** Absolute directory worktrees are created under. */
-	worktreeRoot: z.string().default(DEFAULT_WORKTREE_ROOT),
+	/** Subdirectory of the session workspace that holds its worktrees. */
+	worktreeDir: z.string().default(DEFAULT_WORKTREE_DIR),
 	/** Base ref new worktrees start from, unless a tool call overrides. */
 	worktreeBranch: z.string().default("origin/main"),
 	/** Create worktrees at a detached HEAD (true) vs a fresh branch `dsh/…` (false). */
 	worktreeDetached: z.boolean().default(true),
-	/** Remove the worktree (and its workspace row) when its session is archived. */
+	/** Remove the session's worktrees (and their container) when it is archived. */
 	worktreeCleanupOnArchive: z.boolean().default(true),
-	/** Cap concurrent worktrees per repo; refuse creating beyond it. */
-	worktreeMaxPerRepo: z.number().default(50),
-	/** Preserve the worktree if session creation fails afterward (debugging) vs auto-remove. */
-	worktreeKeepOnFailure: z.boolean().default(false),
-	/** On plugin start, `git worktree prune` and drop orphaned worktree workspace rows. */
+	/** Cap concurrent worktrees per session; refuse creating beyond it. */
+	worktreeMaxPerSession: z.number().default(8),
+	/** On plugin start, prune worktrees whose session no longer exists. */
 	worktreePruneOnStartup: z.boolean().default(true)
 });
 
 /**
  * Resolve the effective worktree config, applying defaults at read time so a
- * settings document that omits a worktree key still yields every option.
+ * settings document that omits a worktree key still yields every option. The
+ * directory is forced to a single safe path segment so it can never escape the
+ * session workspace.
  */
 function wtConfig(scope) {
 	const value = scope.get();
-	const root = typeof value.worktreeRoot === "string" && isAbsolute(value.worktreeRoot)
-		? value.worktreeRoot
-		: DEFAULT_WORKTREE_ROOT;
+	const dir = typeof value.worktreeDir === "string" && value.worktreeDir.trim()
+		? value.worktreeDir.trim().replace(/^[/\\]+|[/\\]+$/g, "")
+		: DEFAULT_WORKTREE_DIR;
+	const safeDir = dir && !dir.split(/[/\\]/).includes("..") ? dir : DEFAULT_WORKTREE_DIR;
 	return {
 		enabled: value.worktreeEnabled !== false,
-		root,
+		dir: safeDir,
 		branch: (typeof value.worktreeBranch === "string" && value.worktreeBranch.trim()) || "origin/main",
 		detached: value.worktreeDetached !== false,
 		cleanupOnArchive: value.worktreeCleanupOnArchive !== false,
-		maxPerRepo: Number.isFinite(value.worktreeMaxPerRepo) ? value.worktreeMaxPerRepo : 50,
-		keepOnFailure: value.worktreeKeepOnFailure === true,
+		maxPerSession: Number.isFinite(value.worktreeMaxPerSession) ? value.worktreeMaxPerSession : 8,
 		pruneOnStartup: value.worktreePruneOnStartup !== false
 	};
 }
@@ -227,131 +232,131 @@ async function localCreate(path, name) {
 }
 
 // ── Worktree helpers ───────────────────────────────────────────────────────
+//
+// Worktrees live INSIDE the session's own workspace, at
+// `<session cwd>/<worktreeDir>/<sessionId>/<name>`. That location is not a
+// preference: the file sandbox's writable root is the session `cwd`
+// (`sandboxPolicy.resolve()` derives it from `session.header.cwd`), so a
+// worktree anywhere else could not be read or written by the agent's own tools.
+// Worktrees are never registered as DSH workspaces — that is what previously
+// turned every one of them into a separate session and sidebar entry.
 
 /** Resolve a `repo` argument (a workspace id or a filesystem path) to a git repo path. */
-async function resolveRepoPath(ctx, repo) {
+async function resolveRepoPath(ctx, repo, fallback) {
 	const workspace = typeof repo === "string" ? ctx.get("workspaceRegistry")?.get(repo) : undefined;
 	if (workspace) return workspace.path;
-	const candidate = typeof repo === "string" && isAbsolute(repo) ? repo : join(process.cwd(), String(repo ?? ""));
-	if (!(await isGitRepo(candidate))) throw new Error(`'${repo}' is not a git repository`);
+	const candidate = typeof repo === "string" && isAbsolute(repo) ? repo
+		: typeof repo === "string" && repo.trim() ? join(fallback ?? process.cwd(), repo.trim())
+			: fallback;
+	if (!candidate) throw new Error("a repository path or workspace id is required");
+	if (!(await isGitRepo(candidate))) throw new Error(`'${candidate}' is not a git repository`);
 	return candidate;
 }
 
-/** Read-only info a client needs to decide whether to route a New Session through worktrees. */
-async function workspaceInfo(ctx, scope, workspaceId) {
-	const ws = ctx.get("workspaceRegistry")?.get(workspaceId);
+/**
+ * Resolve the session context a worktree tool runs in: its workspace (which is
+ * the repo), its id, and its own worktree container.
+ */
+function worktreeSession(exec, scope) {
+	const session = exec?.agent?.session;
+	const sessionCwd = session?.header?.cwd;
+	const sessionId = session?.header?.id ?? session?.id;
+	if (typeof sessionCwd !== "string" || sessionCwd === "") {
+		throw new Error("this session has no workspace directory to create a worktree in");
+	}
+	if (typeof sessionId !== "string" || sessionId === "") {
+		throw new Error("this session has no id to scope its worktrees");
+	}
 	const wt = wtConfig(scope);
-	if (!ws) return { isGitRepo: false, worktreeEnabled: false, repoPath: null, defaultBranch: null };
-	const git = await isGitRepo(ws.path);
-	return {
-		isGitRepo: git,
-		worktreeEnabled: wt.enabled && git,
-		repoPath: git ? ws.path : null,
-		defaultBranch: git ? await resolveDefaultBranch(ws.path) : null,
-		keepOnFailure: wt.keepOnFailure
-	};
+	return { wt, sessionCwd, sessionId, container: join(sessionCwd, wt.dir, sessionId) };
+}
+
+/** Turn an agent-supplied worktree name into one safe path segment. */
+function worktreeLeaf(name) {
+	const leaf = slug(String(name ?? "")).slice(0, 64);
+	if (!leaf) throw new Error("a worktree `name` is required (letters, digits, '.', '_' or '-')");
+	return leaf;
 }
 
 /**
- * Per-repository serialization for the count-then-create sequence. Without it
- * two concurrent New Sessions can both observe a count below `maxPerRepo` and
- * both add a worktree.
+ * Per-container serialization for the count-then-create sequence, so two
+ * concurrent creates cannot both pass the cap check.
  */
-const repoLocks = new Map();
-function withRepoLock(repoPath, operation) {
-	const previous = repoLocks.get(repoPath) ?? Promise.resolve();
+const worktreeLocks = new Map();
+function withWorktreeLock(key, operation) {
+	const previous = worktreeLocks.get(key) ?? Promise.resolve();
 	const run = previous.then(operation, operation);
 	const tail = run.then(() => {}, () => {});
-	repoLocks.set(repoPath, tail);
-	// Drop the entry once this is the last queued operation for the repo.
-	tail.then(() => { if (repoLocks.get(repoPath) === tail) repoLocks.delete(repoPath); });
+	worktreeLocks.set(key, tail);
+	tail.then(() => { if (worktreeLocks.get(key) === tail) worktreeLocks.delete(key); });
 	return run;
 }
 
 /**
- * Create one worktree for a repo and register it as a workspace. The directory
- * is `<root>/<repo-slug>/<sessionId>`: the name carries the owning session, which
- * is both human-readable and the plugin's ownership signal for cleanup. The
- * caller (client or tool) passes the returned `sessionId` into the subsequent
- * session create so the session lands in this worktree workspace.
+ * Create one worktree inside this session's container. The default base ref is
+ * the configured branch (`origin/main`); the caller may name another. The
+ * container is added to the repository's local exclude so it never appears as
+ * untracked in `git status`.
  */
-async function createWorktreeFromRepo(ctx, scope, { repo, branch, sessionId }) {
-	const wt = wtConfig(scope);
+async function createWorktreeForSession(ctx, scope, exec, args) {
+	const { wt, sessionCwd, container } = worktreeSession(exec, scope);
 	if (!wt.enabled) throw new Error("worktrees are disabled (enable in the GitHub plugin settings)");
-	const repoPath = await resolveRepoPath(ctx, repo);
-	if (!(await isGitRepo(repoPath))) throw new Error(`'${repoPath}' is not a git repository`);
-	const session = sessionId && isSessionDirName(sessionId) ? sessionId : `session-${randomUUID()}`;
-	const ref = (typeof branch === "string" && branch.trim()) || wt.branch;
+	const repoPath = await resolveRepoPath(ctx, args?.repo, sessionCwd);
+	const leaf = worktreeLeaf(args?.name);
+	const ref = (typeof args?.branch === "string" && args.branch.trim()) || wt.branch;
+	const dest = join(container, leaf);
+	if (!isWithin(sessionCwd, dest)) throw new Error(`worktree path '${dest}' escapes the session workspace`);
 
-	const dest = join(wt.root, slug(basename(repoPath)), session);
-	if (!isWithin(wt.root, dest)) throw new Error(`worktree path '${dest}' escapes the worktree root '${wt.root}'`);
-
-	return await withRepoLock(repoPath, async () => {
-		// Cap concurrent worktrees per repo inside the lock (the main checkout is never counted).
-		const existing = (await listWorktrees(repoPath)).filter((w) => w.path !== repoPath);
-		if (wt.maxPerRepo > 0 && existing.length >= wt.maxPerRepo) {
-			throw new Error(`repo '${repoPath}' already has ${existing.length} worktrees (max ${wt.maxPerRepo}); remove some first`);
+	return await withWorktreeLock(container, async () => {
+		const mine = (await listWorktrees(repoPath)).filter((w) => isWithin(container, w.path));
+		if (wt.maxPerSession > 0 && mine.length >= wt.maxPerSession) {
+			throw new Error(`this session already has ${mine.length} worktrees (max ${wt.maxPerSession}); remove one first`);
 		}
+		if (mine.some((w) => w.path === dest)) throw new Error(`a worktree named '${leaf}' already exists in this session`);
+		await mkdir(container, { recursive: true });
 		await createWorktree({
 			repoPath,
 			dest,
 			ref,
 			detach: wt.detached,
-			newBranch: wt.detached ? undefined : `dsh/${session.replace(/^session-/, "").slice(0, 12)}`
+			newBranch: wt.detached ? undefined : `dsh/${leaf}`
 		});
-		try {
-			const workspace = await ctx.get("workspaceRegistry").create(dest, `${basename(repoPath)} (${session.slice(0, 12)})`);
-			return { worktreePath: dest, worktreeWorkspaceId: workspace.id, sessionId: session, branch: ref, repoPath };
-		} catch (error) {
-			// `git worktree add` already succeeded; a failed registration must not
-			// leak an unregistered worktree that still counts toward the cap.
-			await removeWorktree({ worktreePath: dest, repoPath }).catch(() => {});
-			throw error;
-		}
+		await ensureExcluded(repoPath, `${wt.dir}/`).catch(() => {});
+		return { worktreePath: dest, branch: ref, repoPath, name: leaf };
 	});
 }
 
-/** Remove a worktree and its workspace registration, guarded to plugin-owned worktrees. */
-async function removeWorktreeOp(ctx, scope, args) {
-	let worktreePath;
-	let workspaceId;
-	if (args?.worktreeWorkspaceId) {
-		const ws = ctx.get("workspaceRegistry")?.get(args.worktreeWorkspaceId);
-		if (!ws) throw new Error(`github: unknown worktree workspace '${args.worktreeWorkspaceId}'`);
-		worktreePath = ws.path;
-		workspaceId = ws.id;
-	} else if (args?.worktreePath) {
-		worktreePath = args.worktreePath;
-		workspaceId = (await ctx.get("workspaceRegistry").resolveByPath(worktreePath))?.id;
-	} else {
-		throw new Error("github/remove-worktree: `worktreePath` or `worktreeWorkspaceId` is required");
-	}
-	// Ownership is the plugin's session-named linked worktree — not the live
-	// worktreeRoot, which is editable and must not strand trees made under an
-	// earlier root.
-	if (!(await isManagedWorktree(worktreePath))) {
-		throw new Error(`github: refusing to remove '${worktreePath}' — not a plugin-managed worktree`);
-	}
-	await removeWorktree({ worktreePath, repoPath: undefined });
-	if (workspaceId) await ctx.get("workspaceRegistry").delete(workspaceId);
-	return { removed: true, worktreePath };
-}
-
-/** List a repo's worktrees, tagged with whether each is a managed (plugin-created) one. */
-async function listWorktreesOp(ctx, scope, args) {
-	const repoPath = await resolveRepoPath(ctx, args?.repo ?? args?.repoPath ?? process.cwd());
-	const list = await listWorktrees(repoPath);
-	const out = [];
-	for (const w of list) {
-		out.push({
+/** List this session's worktrees. */
+async function listWorktreesForSession(ctx, scope, exec, args) {
+	const { sessionCwd, container } = worktreeSession(exec, scope);
+	const repoPath = await resolveRepoPath(ctx, args?.repo, sessionCwd);
+	const all = await listWorktrees(repoPath).catch(() => []);
+	const worktrees = [];
+	for (const w of all) {
+		if (!isWithin(container, w.path)) continue;
+		worktrees.push({
+			name: basename(w.path),
 			path: w.path,
 			branch: w.branch ?? null,
-			head: w.head ?? null,
 			detached: !!w.detached,
-			managed: await isManagedWorktree(w.path)
+			head: w.head ?? null
 		});
 	}
-	return { repoPath, worktrees: out };
+	return { repoPath, container, worktrees };
+}
+
+/** Remove one worktree from this session's container (by `name` or absolute `path`). */
+async function removeWorktreeForSession(exec, scope, args) {
+	const { container } = worktreeSession(exec, scope);
+	const given = typeof args?.path === "string" && args.path.trim() ? args.path.trim() : undefined;
+	const worktreePath = given ?? (args?.name ? join(container, worktreeLeaf(args.name)) : undefined);
+	if (!worktreePath) throw new Error("a worktree `name` or `path` is required");
+	// Ownership: a linked worktree inside THIS session's own container.
+	if (!(await isWorktreeUnder(container, worktreePath))) {
+		throw new Error(`github: refusing to remove '${worktreePath}' — not a worktree in this session's container`);
+	}
+	await removeWorktree({ worktreePath });
+	return { removed: true, worktreePath };
 }
 
 /** Resolve a session's workspace cwd, preferring the live session over persistence. */
@@ -366,26 +371,46 @@ async function sessionCwd(ctx, sessionId) {
 	return undefined;
 }
 
-/** Remove the worktree backing a session (used on archive). */
-async function cleanupWorktreeForSession(ctx, scope, sessionId) {
+/** Remove every worktree in one session's container, plus the container itself. */
+async function removeSessionContainer(ctx, container) {
+	let entries;
+	try {
+		entries = await readdir(container, { withFileTypes: true });
+	} catch {
+		return 0;
+	}
+	let removed = 0;
+	for (const entry of entries) {
+		if (!entry.isDirectory()) continue;
+		const child = join(container, entry.name);
+		if (!(await isWorktreeUnder(container, child))) continue;
+		await removeWorktree({ worktreePath: child })
+			.then(() => { removed += 1; })
+			.catch((error) => ctx.logger?.warn(`github: failed to remove worktree '${child}': ${String(error?.message ?? error)}`));
+	}
+	await rm(container, { recursive: true, force: true }).catch(() => {});
+	return removed;
+}
+
+/** Remove the worktrees created by an archived session. */
+async function cleanupWorktreesForSession(ctx, scope, sessionId) {
 	const wt = wtConfig(scope);
 	if (!wt.cleanupOnArchive) return;
 	const cwd = await sessionCwd(ctx, sessionId);
-	// Ownership is exact (the directory is named after this session) and does not
-	// depend on the live worktreeRoot, so changing that setting cannot strand it.
-	if (!cwd || !(await isManagedWorktree(cwd, sessionId))) return;
-	const registry = ctx.get("workspaceRegistry");
-	const existing = await registry.resolveByPath(cwd);
-	await removeWorktree({ worktreePath: cwd, repoPath: undefined });
-	if (existing) await registry.delete(existing.id).catch(() => {});
+	if (!cwd) return;
+	const container = join(cwd, wt.dir, sessionId);
+	// The container is derived from the archived session's own id, so it is
+	// exactly this session's worktrees — no other session's tree can match.
+	if (!isWithin(cwd, container)) return;
+	await removeSessionContainer(ctx, container);
 }
 
 /**
- * Wrap `workspaceRegistry.archiveSession` so that archiving a worktree-backed
- * session also removes its worktree. There is no dedicated "session archived"
- * event, and the UI archive path funnels through this method, so this is the
- * single reliable seam. The wrapper is installed and uninstalled through the
- * plugin fiber, so a stop/update restores the original implementation.
+ * Wrap `workspaceRegistry.archiveSession` so archiving a session also removes
+ * the worktrees it created. There is no dedicated "session archived" event and
+ * the UI archive path funnels through this method, so this is the single
+ * reliable seam. The wrapper is installed and uninstalled through the plugin
+ * fiber, so a stop/update restores the original implementation.
  */
 function wrapArchiveSession(ctx, scope) {
 	const registry = ctx.get("workspaceRegistry");
@@ -393,7 +418,7 @@ function wrapArchiveSession(ctx, scope) {
 	const original = registry.archiveSession.bind(registry);
 	registry.archiveSession = async (sessionId) => {
 		const result = await original(sessionId);
-		await cleanupWorktreeForSession(ctx, scope, sessionId)
+		await cleanupWorktreesForSession(ctx, scope, sessionId)
 			.catch((error) => ctx.logger?.warn(`github: worktree cleanup on archive failed: ${String(error?.message ?? error)}`));
 		return result;
 	};
@@ -402,63 +427,58 @@ function wrapArchiveSession(ctx, scope) {
 	else ctx.on?.("dispose", restore);
 }
 
-/** On plugin start, prune stale worktree metadata and drop orphaned rows. */
+/**
+ * On plugin start, drop worktree containers whose session no longer exists —
+ * a session removed without passing through archive, or a cleanup that failed.
+ * Containers younger than two minutes are left alone (a create may be in flight).
+ */
 async function startupPrune(ctx, scope) {
 	const wt = wtConfig(scope);
 	if (!wt.pruneOnStartup) return;
 	const registry = ctx.get("workspaceRegistry");
 	if (!registry) return;
-	const ids = registry.list().map((w) => w.id);
-	for (const id of ids) {
-		const ws = registry.get(id);
-		if (!ws || !(await isGitRepo(ws.path))) continue;
-		await prune(ws.path).catch(() => {});
-	}
-	// Build the set of known sessions once. If persistence cannot be read we skip
-	// the destructive half entirely rather than risk pruning a live worktree.
-	let knownSessions;
+	// Known sessions. If persistence cannot be read we skip the destructive pass
+	// entirely rather than risk removing a live session's worktrees.
+	let known;
 	try {
 		const persistence = ctx.get("sessionPersistence");
 		if (typeof persistence?.list !== "function") return;
-		knownSessions = new Set((await persistence.list()).map((header) => header.id));
-		for (const session of ctx.get("sessions")?.list() ?? []) knownSessions.add(session.id);
+		known = new Set((await persistence.list()).map((header) => header.id));
+		for (const session of ctx.get("sessions")?.list() ?? []) known.add(session.id);
 	} catch (error) {
 		ctx.logger?.warn(`github: skipping orphaned-worktree prune (session list unreadable): ${String(error?.message ?? error)}`);
 		return;
 	}
 	const now = Date.now();
-	for (const id of ids) {
-		const ws = registry.get(id);
-		if (!ws) continue;
-		let exists = true;
+	for (const workspace of registry.list()) {
+		if (!(await isGitRepo(workspace.path))) continue;
+		await prune(workspace.path).catch(() => {});
+		const root = join(workspace.path, wt.dir);
+		let entries;
 		try {
-			await stat(ws.path);
+			entries = await readdir(root, { withFileTypes: true });
 		} catch {
-			exists = false;
-		}
-		if (!exists) {
-			// The directory is gone — drop the stale registration.
-			await registry.delete(id).catch(() => {});
 			continue;
 		}
-		// A plugin worktree whose pre-allocated session never materialized (the
-		// browser closed between the create-worktree RPC and the session create)
-		// would otherwise leak forever and count toward maxPerRepo.
-		if (!isSessionDirName(basename(ws.path)) || knownSessions.has(basename(ws.path))) continue;
-		// Leave anything created in the last two minutes alone: a creation may be
-		// in flight (plugin hot-reload) rather than orphaned.
-		const createdAt = Date.parse(ws.createdAt ?? "");
-		if (Number.isFinite(createdAt) && now - createdAt < 2 * 60 * 1000) continue;
-		if (!(await isManagedWorktree(ws.path))) continue;
-		await removeWorktree({ worktreePath: ws.path }).catch(() => {});
-		await registry.delete(id).catch(() => {});
+		for (const entry of entries) {
+			if (!entry.isDirectory() || !isSessionDirName(entry.name) || known.has(entry.name)) continue;
+			const container = join(root, entry.name);
+			try {
+				const info = await stat(container);
+				if (now - info.mtimeMs < 2 * 60 * 1000) continue;
+			} catch {
+				continue;
+			}
+			await removeSessionContainer(ctx, container);
+			ctx.logger?.info(`github: pruned orphaned worktrees for absent session ${entry.name}`);
+		}
 	}
 }
 
 /**
- * Register the worktree model tools. The current session's workspace (`cwd`)
- * is the default repo when none is named, so within a worktree session the
- * agent can branch another worktree off the same repository without naming it.
+ * Register the worktree model tools. Worktrees are created inside the CURRENT
+ * session's own workspace, so several issues can be worked in parallel without
+ * leaving the session. The session's workspace is the default repository.
  */
 function registerTools(ctx, scope) {
 	const tools = ctx.get("tools");
@@ -470,29 +490,27 @@ function registerTools(ctx, scope) {
 	tools.register({
 		name: "github_create_worktree",
 		description:
-			"Create a fresh Git worktree of a repository and register it as a DSH workspace. " +
-			"The worktree is created on the configured base ref (default origin/main) unless `branch` is given; " +
-			"`repo` may be a workspace id or an absolute repo path and defaults to the current session's workspace. " +
-			"Returns the worktree path, its branch, and its new workspace id — open a session in that workspace to work inside it.",
+			"Create a Git worktree INSIDE this session's workspace so several issues on the same repository can be worked in parallel without leaving this session. " +
+			"The worktree is created at <session workspace>/<worktreeDir>/<sessionId>/<name> (git-excluded, so `git status` stays clean) " +
+			"on the configured base ref (default origin/main) unless `branch` is given. Returns the worktree path — pass it as `workdir` to bash, " +
+			"or use absolute paths under it, to work on that issue. Worktrees are NOT separate sessions.",
 		parameters: {
 			type: "object",
 			properties: {
-				repo: { type: "string", description: "Repo to branch from: a workspace id or an absolute path. Defaults to the current session workspace." },
-				branch: { type: "string", description: "Branch or ref to start the worktree at (default origin/main)." }
-			}
+				name: { type: "string", description: "Short name for the worktree, e.g. the issue id or a slug. One path segment." },
+				branch: { type: "string", description: "Base branch or ref to start the worktree at (default origin/main)." },
+				repo: { type: "string", description: "Repository to branch from: a workspace id or an absolute path. Defaults to this session's workspace." }
+			},
+			required: ["name"]
 		},
 		output: {
 			schema: { type: "string" },
 			render(_args, value) { return [{ type: "text", text: String(value) }]; }
 		},
 		async execute(args, exec) {
-			const wt = wtConfig(scope);
-			if (!wt.enabled) return "github_create_worktree: worktrees are disabled (enable in the GitHub plugin settings).";
-			const repo = (args.repo && String(args.repo).trim()) || exec?.agent?.session?.header?.cwd;
-			if (!repo) return "github_create_worktree: a repo path or workspace id is required.";
 			try {
-				const result = await createWorktreeFromRepo(ctx, scope, { repo, branch: args.branch });
-				return `Created worktree ${result.worktreePath} (branch ${result.branch}, workspace ${result.worktreeWorkspaceId}). Open a session in that workspace to work in it.`;
+				const result = await createWorktreeForSession(ctx, scope, exec, args);
+				return `Created worktree '${result.name}' at ${result.worktreePath} (base ${result.branch}, repo ${result.repoPath}). Pass that path as \`workdir\` to bash to work on this issue.`;
 			} catch (error) {
 				return `github_create_worktree: ${String(error?.message ?? error)}`;
 			}
@@ -502,12 +520,11 @@ function registerTools(ctx, scope) {
 	tools.register({
 		name: "github_list_worktrees",
 		description:
-			"List the Git worktrees of a repository (path, branch/HEAD, and whether each was created by this plugin). " +
-			"`repo` may be a workspace id or an absolute repo path and defaults to the current session's workspace.",
+			"List the worktrees this session has created in its workspace (name, path, branch/HEAD), so you can pick the one for an issue.",
 		parameters: {
 			type: "object",
 			properties: {
-				repo: { type: "string", description: "Repo to inspect: a workspace id or an absolute path. Defaults to the current session workspace." }
+				repo: { type: "string", description: "Repository to inspect: a workspace id or an absolute path. Defaults to this session's workspace." }
 			}
 		},
 		output: {
@@ -515,12 +532,13 @@ function registerTools(ctx, scope) {
 			render(_args, value) { return [{ type: "text", text: String(value) }]; }
 		},
 		async execute(args, exec) {
-			const repo = (args.repo && String(args.repo).trim()) || exec?.agent?.session?.header?.cwd;
-			if (!repo) return "github_list_worktrees: a repo path or workspace id is required.";
 			try {
-				const result = await listWorktreesOp(ctx, scope, { repo });
-				const rows = result.worktrees.map((w) => `- ${w.path}${w.branch ? ` (branch ${w.branch})` : ""}${w.detached ? " [detached]" : ""}${w.managed ? " [managed]" : ""}`);
-				return rows.length ? `Worktrees of ${result.repoPath}:\n${rows.join("\n")}` : `No worktrees for ${result.repoPath}.`;
+				const result = await listWorktreesForSession(ctx, scope, exec, args);
+				if (result.worktrees.length === 0) {
+					return `No worktrees in this session yet (container ${result.container}). Use github_create_worktree to make one.`;
+				}
+				const rows = result.worktrees.map((w) => `- ${w.name}: ${w.path}${w.branch ? ` (branch ${w.branch})` : ""}${w.detached ? " [detached]" : ""}`);
+				return `Worktrees for this session (repo ${result.repoPath}):\n${rows.join("\n")}`;
 			} catch (error) {
 				return `github_list_worktrees: ${String(error?.message ?? error)}`;
 			}
@@ -530,25 +548,23 @@ function registerTools(ctx, scope) {
 	tools.register({
 		name: "github_remove_worktree",
 		description:
-			"Remove a Git worktree created by this plugin and unregister its DSH workspace. " +
-			"Pass its `worktreeWorkspaceId` (from github_create_worktree) or its absolute `worktreePath`. " +
-			"Only worktrees under the configured worktree root can be removed.",
+			"Remove one of this session's worktrees (by `name` or absolute `path`). Only worktrees inside this session's own " +
+			"worktree container can be removed. Uncommitted changes in the worktree are discarded.",
 		parameters: {
 			type: "object",
 			properties: {
-				worktreeWorkspaceId: { type: "string", description: "Workspace id of the worktree to remove." },
-				worktreePath: { type: "string", description: "Or the absolute path of the worktree to remove." }
+				name: { type: "string", description: "Worktree name, as passed to github_create_worktree." },
+				path: { type: "string", description: "Or the absolute path of the worktree to remove." }
 			}
 		},
 		output: {
 			schema: { type: "string" },
 			render(_args, value) { return [{ type: "text", text: String(value) }]; }
 		},
-		async execute(args) {
-			if (!args.worktreeWorkspaceId && !args.worktreePath) return "github_remove_worktree: `worktreeWorkspaceId` or `worktreePath` is required.";
+		async execute(args, exec) {
 			try {
-				const result = await removeWorktreeOp(ctx, scope, args);
-				return `Removed worktree ${result.worktreePath} and unregistered its workspace.`;
+				const result = await removeWorktreeForSession(exec, scope, args);
+				return `Removed worktree ${result.worktreePath}.`;
 			} catch (error) {
 				return `github_remove_worktree: ${String(error?.message ?? error)}`;
 			}
@@ -614,27 +630,6 @@ function registerHandlers(ctx, scope) {
 					value = await localCreate(payload?.path, payload?.name);
 					break;
 				}
-				case "github/workspace-info": {
-					value = await workspaceInfo(ctx, scope, payload?.workspaceId);
-					break;
-				}
-				case "github/create-worktree": {
-					if (!payload?.workspaceId) throw new Error("github/create-worktree: `workspaceId` is required");
-					value = await createWorktreeFromRepo(ctx, scope, {
-						repo: payload.workspaceId,
-						branch: payload.branch,
-						sessionId: payload.sessionId
-					});
-					break;
-				}
-				case "github/remove-worktree": {
-					value = await removeWorktreeOp(ctx, scope, payload);
-					break;
-				}
-				case "github/list-worktrees": {
-					value = await listWorktreesOp(ctx, scope, payload);
-					break;
-				}
 				default:
 					throw new Error(`github: unknown endpoint '${endpoint}'`);
 			}
@@ -670,4 +665,4 @@ function apply(ctx, config) {
 	ctx.provide("directoryPicker", { capability: () => capability });
 }
 
-export { Config, name, inject, apply, DEFAULT_CLONE_ROOT, DEFAULT_WORKTREE_ROOT, resolveToken, createWorkspaceFromRepo };
+export { Config, name, inject, apply, DEFAULT_CLONE_ROOT, DEFAULT_WORKTREE_DIR, resolveToken, createWorkspaceFromRepo };

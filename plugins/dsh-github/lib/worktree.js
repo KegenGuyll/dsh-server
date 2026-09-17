@@ -1,20 +1,20 @@
 /**
  * dsh-github worktree logic: git worktree helpers over Node's child_process.
  * This module is plain ESM and has no Cordis dependency of its own; the plugin
- * in index.js wires it to ctx.workspaceRegistry / ctx.settings.
+ * in index.js wires it to ctx.settings.
  *
- * A "managed worktree" is a linked worktree created by this plugin: its `.git`
- * is a FILE (pointing back into the owning repository), not a directory. That
- * marker is what lets cleanup remove worktrees we created without ever touching
- * an unrelated nested directory or a plain checkout.
+ * A plugin-created worktree is a linked worktree (its `.git` is a FILE pointing
+ * back into the owning repository) living inside a per-session container under
+ * the session's own workspace. Both properties are required before anything is
+ * removed, so an unrelated nested directory or a plain checkout is never touched.
  *
  * Git commands are run with native `execFile` (Node 22) and never through a
  * shell, so a repo/branch/path can never be split into extra argv.
  */
 
 import { execFile } from "node:child_process";
-import { stat, readFile, rm } from "node:fs/promises";
-import { join, dirname, relative, isAbsolute, basename } from "node:path";
+import { stat, readFile, writeFile, mkdir, rm } from "node:fs/promises";
+import { join, dirname, relative, isAbsolute } from "node:path";
 
 /** Run `git` with `args` in `repoPath`, bounded output and a timeout. */
 function runGit({ repoPath, args, timeoutMs = 120000 }) {
@@ -69,38 +69,31 @@ async function isLinkedWorktree(path) {
 }
 
 /**
- * The plugin names each worktree directory exactly after the session it backs,
- * so the session id in the directory name is the positive ownership signal —
- * stronger than Git's generic linked-worktree marker, and independent of the
- * (live-editable) worktree root.
+ * The plugin names each per-session worktree container after the session it
+ * backs (`<session workspace>/<dir>/<sessionId>/`), so the session id in the
+ * directory name is the positive ownership signal for cleanup — independent of
+ * the live settings.
  */
 const SESSION_DIR_NAME = /^session-[A-Za-z0-9-]+$/;
 
-/** Whether a directory basename is one of this plugin's session worktree names. */
+/** Whether a directory basename is one of this plugin's session container names. */
 function isSessionDirName(name) {
 	return SESSION_DIR_NAME.test(String(name));
-}
-
-/**
- * Whether `worktreePath` is a worktree created by this plugin. With `sessionId`
- * the directory name must equal that session id exactly; without it, any
- * session-named linked worktree counts. Requiring a linked worktree (`.git` is a
- * file) means a plain directory can never be removed.
- */
-async function isManagedWorktree(worktreePath, sessionId) {
-	const base = basename(String(worktreePath));
-	if (sessionId !== undefined) {
-		if (base !== String(sessionId)) return false;
-	} else if (!SESSION_DIR_NAME.test(base)) {
-		return false;
-	}
-	return await isLinkedWorktree(worktreePath);
 }
 
 /** Whether `child` is strictly inside `parent` (path-lexical; both absolute). */
 function isWithin(parent, child) {
 	const rel = relative(parent, child);
 	return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+/**
+ * Whether `path` is a linked worktree inside `root`. Requiring a linked worktree
+ * (`.git` is a file) means a plain directory can never be removed, and the root
+ * check keeps every operation inside the owning session's own container.
+ */
+async function isWorktreeUnder(root, path) {
+	return isWithin(root, path) && await isLinkedWorktree(path);
 }
 
 /**
@@ -200,6 +193,30 @@ async function prune(repoPath) {
 }
 
 /**
+ * Add `entry` to the repository's local exclude file (`.git/info/exclude`) so an
+ * in-tree worktree container never shows up as untracked. This is local-only —
+ * nothing is added to a committed `.gitignore`. Idempotent.
+ * @returns the exclude file path.
+ */
+async function ensureExcluded(repoPath, entry) {
+	const out = (await runGit({ repoPath, args: ["rev-parse", "--git-common-dir"], timeoutMs: 30000 })).trim();
+	const commonDir = isAbsolute(out) ? out : join(repoPath, out);
+	const excludePath = join(commonDir, "info", "exclude");
+	let current = "";
+	try {
+		current = await readFile(excludePath, "utf8");
+	} catch {
+		current = "";
+	}
+	const lines = current.split("\n");
+	if (lines.some((line) => line.trim() === entry)) return excludePath;
+	const next = `${current}${current === "" || current.endsWith("\n") ? "" : "\n"}${entry}\n`;
+	await mkdir(dirname(excludePath), { recursive: true });
+	await writeFile(excludePath, next);
+	return excludePath;
+}
+
+/**
  * Remove a worktree durably. Prefers `git worktree remove --force`; if git
  * refuses (e.g. the tree is locked and the force flag was overridden by config)
  * it falls back to a recursive filesystem remove, then prunes metadata.
@@ -252,13 +269,14 @@ export {
 	isGitRepo,
 	isLinkedWorktree,
 	isSessionDirName,
-	isManagedWorktree,
+	isWorktreeUnder,
 	isWithin,
 	resolveDefaultBranch,
 	baseRepoOf,
 	createWorktree,
 	listWorktrees,
 	prune,
+	ensureExcluded,
 	removeWorktree,
 	runGit
 };
