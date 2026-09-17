@@ -17,23 +17,27 @@ RUN apt-get update \
   && npm install -g @deepseek-ai/dsh@0.1.5-rc.2 \
   && npm install -g pnpm
 
-# Loosen the settings/credentials configuration plane so it honors --trusted-host
-# instead of being pinned to loopback. Upstream keeps these privileged methods
-# (settings.describe/update/mutate, credentials.*, agentPreset.*,
-# llm.discoverModels) loopback-only until a real auth layer exists; this
-# deployment's auth boundary is the tailnet (docs/dsh.md). The patch script is
-# idempotent and fails the build loudly if the upstream layout changes so the
-# deviation is never silently dropped on a dsh upgrade.
-COPY patches/trusted-config-plane.mjs /patches/trusted-config-plane.mjs
-RUN node /patches/trusted-config-plane.mjs
-
-# The DSH *client* also pins the settings plane to loopback: the settings mirror
-# and per-namespace scope are created with `connection.isLoopback ? "host" :
-# "memory"`, so a page served over the trusted tailnet FQDN leaves the mirror
-# "memory" (unavailable) and the UI fails with "settings are unavailable in this
-# browser" even though the server fence above accepts the request. Pin both to
-# "host" so the browser reads/writes settings over the wire; the server fence is
-# the authoritative gate. Same idempotent + fail-loud contract as above.
+# The DSH *client* pins the settings plane to loopback: the client's describe
+# mirror and per-namespace scope bind to `ctx.remote.$host.isLoopback ? "host" :
+# "memory"`, so a page served over the trusted tailnet FQDN gets persistence
+# "memory", reports status "unavailable", and never reads or writes settings
+# even though the server would accept the request. Pin that one decision to
+# "host" so the browser uses the host over the wire.
+#
+# The server /api fence stays the authoritative gate. Since dsh 0.1.5 it demands
+# both a declared --trusted-host authority and a signed, authority-bound browser
+# session cookie (upstream BrowserAuth), so this client-side pin cannot widen
+# access by itself: an untrusted authority, or a page without a valid session,
+# is refused server-side regardless of what the client believes.
+#
+# patches/trusted-config-plane.mjs is deliberately gone. It relaxed a
+# PRIVILEGED_METHODS gate that pinned the settings/credentials methods to
+# loopback; dsh 0.1.5 deleted that gate and now fences the whole plane on
+# trustedHosts — precisely what --trusted-host declares — so the deviation is
+# upstream behavior, and keeping the patch would only fail the build.
+#
+# The patch is idempotent and fails the build loudly if the upstream layout
+# changes, so the deviation is never silently dropped on a dsh upgrade.
 COPY patches/client-loopback-settings.mjs /patches/client-loopback-settings.mjs
 RUN node /patches/client-loopback-settings.mjs
 
