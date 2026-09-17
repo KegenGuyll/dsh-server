@@ -115,11 +115,12 @@ window.__ModuleLoader__.load({
 		 */
 		var WORKTREE_FIELDS = [
 			"worktreeEnabled", "worktreeDir", "worktreeBranch", "worktreeDetached",
-			"worktreeCleanupOnArchive", "worktreeMaxPerSession", "worktreePruneOnStartup"
+			"worktreeCleanupOnArchive", "worktreeRequireForEdits", "worktreeMaxPerSession",
+			"worktreePruneOnStartup"
 		];
 		function wtIsBool(field) {
 			return field === "worktreeEnabled" || field === "worktreeDetached" || field === "worktreeCleanupOnArchive" ||
-				field === "worktreePruneOnStartup";
+				field === "worktreeRequireForEdits" || field === "worktreePruneOnStartup";
 		}
 		function wtIsNumber(field) { return field === "worktreeMaxPerSession"; }
 		function wtIsText(field) { return field === "worktreeDir" || field === "worktreeBranch"; }
@@ -596,6 +597,7 @@ window.__ModuleLoader__.load({
 					worktreeBranch: this.field("worktreeBranch"),
 					worktreeDetached: this.field("worktreeDetached"),
 					worktreeCleanupOnArchive: this.field("worktreeCleanupOnArchive"),
+					worktreeRequireForEdits: this.field("worktreeRequireForEdits"),
 					worktreeMaxPerSession: this.field("worktreeMaxPerSession"),
 					worktreePruneOnStartup: this.field("worktreePruneOnStartup")
 				};
@@ -728,6 +730,7 @@ window.__ModuleLoader__.load({
 							React.createElement("span", { className: "dsh-github-field-hint" }, "Clone with --depth 1 (full clone when off)"))),
 					React.createElement("p", { className: "dsh-github-worktrees-head" }, "Worktrees — the agent creates git worktrees inside this session's own workspace to work several issues in parallel, without starting new sessions:"),
 					renderWorktreeField(controller, state, "worktreeEnabled", "Allow worktrees", "Let the agent create git worktrees inside this session's workspace, so several issues can be worked in parallel in one session.", "bool"),
+					renderWorktreeField(controller, state, "worktreeRequireForEdits", "Require a worktree before edits", "Deny write/edit calls that target the main checkout until the agent creates a worktree. Off makes it advisory only.", "bool"),
 					renderWorktreeField(controller, state, "worktreeDir", "Worktree directory", "Subdirectory of the session workspace that holds its worktrees (kept out of git status via .git/info/exclude).", "text"),
 					renderWorktreeField(controller, state, "worktreeBranch", "Base branch", "Ref new worktrees start from (default origin/main); the agent can override per tool call.", "text"),
 					renderWorktreeField(controller, state, "worktreeDetached", "Detached HEAD", "Create worktrees at a detached HEAD; off starts a fresh `dsh/…` branch.", "bool"),

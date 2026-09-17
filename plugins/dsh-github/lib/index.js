@@ -20,9 +20,11 @@ import { homedir } from "node:os";
 import { listUserRepos, getRepo, gitClone, slug } from "./github.js";
 import {
 	isGitRepo,
+	isLinkedWorktree,
 	isSessionDirName,
 	isWithin,
 	isWorktreeUnder,
+	editNeedsWorktree,
 	createWorktree,
 	listWorktrees,
 	prune,
@@ -140,6 +142,8 @@ const Config = z.object({
 	worktreeDetached: z.boolean().default(true),
 	/** Remove the session's worktrees (and their container) when it is archived. */
 	worktreeCleanupOnArchive: z.boolean().default(true),
+	/** Require a worktree before the agent may write/edit files in the main checkout. */
+	worktreeRequireForEdits: z.boolean().default(true),
 	/** Cap concurrent worktrees per session; refuse creating beyond it. */
 	worktreeMaxPerSession: z.number().default(8),
 	/** On plugin start, prune worktrees whose session no longer exists. */
@@ -164,6 +168,7 @@ function wtConfig(scope) {
 		branch: (typeof value.worktreeBranch === "string" && value.worktreeBranch.trim()) || "origin/main",
 		detached: value.worktreeDetached !== false,
 		cleanupOnArchive: value.worktreeCleanupOnArchive !== false,
+		requireForEdits: value.worktreeRequireForEdits !== false,
 		maxPerSession: Number.isFinite(value.worktreeMaxPerSession) ? value.worktreeMaxPerSession : 8,
 		pruneOnStartup: value.worktreePruneOnStartup !== false
 	};
@@ -485,10 +490,26 @@ async function startupPrune(ctx, scope) {
 
 /**
  * The worktree workflow, contributed to the GLOBAL system prompt so every
- * session knows to give each issue its own worktree without being asked. The
- * tools alone only say what they do; this says WHEN to reach for them.
+ * session knows to give each issue its own worktree without being asked.
+ *
+ * `REQUIRED` is the enforcing variant: it states the rule as a precondition and
+ * names the denial the guard below produces, so the model is told both what to
+ * do and what happens if it does not. `OPTIONAL` is the advisory variant used
+ * when `worktreeRequireForEdits` is off.
  */
-const WORKTREE_GUIDANCE = [
+const WORKTREE_GUIDANCE_REQUIRED = [
+	"## A git worktree is REQUIRED before you change this repository",
+	"",
+	"Before your first write or edit in this repository, create a worktree. Do not modify the main checkout — it is shared, and uncommitted work there is not isolated to this task.",
+	"",
+	"1. Call `github_create_worktree` with `name` (use the issue id or a short slug). It creates a tree inside this session's workspace on `origin/main` (pass `branch` to base it elsewhere) and returns its path.",
+	"2. Do ALL of that task's work in the returned path: pass it as `workdir` to bash, and use absolute paths under it for `read`/`write`/`edit`.",
+	"3. `write` and `edit` calls that target the main checkout are DENIED until you do this. The denial names the worktree step — treat it as an instruction, not an error to work around.",
+	"4. One worktree per issue. To work several issues at once, delegate each to a subagent and give it that worktree path as its `workdir`.",
+	"5. `github_list_worktrees` lists this session's worktrees; `github_remove_worktree` removes one (discarding its uncommitted changes). This session's worktrees are removed when the session is archived."
+].join("\n");
+
+const WORKTREE_GUIDANCE_OPTIONAL = [
 	"## Git worktrees for multi-issue work",
 	"",
 	"You can work several issues on one repository in parallel using git worktrees — inside this session, without starting a new session.",
@@ -506,8 +527,8 @@ const WORKTREE_GUIDANCE = [
  * Contribute the worktree workflow as a global prompt section. Registered from
  * the plugin's (host-composition) scope, so it is a GLOBAL section that shadows
  * nothing and applies to every session of every preset. The text is a provider
- * so the section follows the live `worktreeEnabled` setting; an empty string
- * contributes nothing (assembly drops empty sections).
+ * so the section follows the live settings; an empty string contributes nothing
+ * (assembly drops empty sections).
  */
 function registerWorktreeGuidance(ctx, scope) {
 	const systemPrompt = ctx.get("systemPrompt");
@@ -519,8 +540,59 @@ function registerWorktreeGuidance(ctx, scope) {
 	ctx.effect(() => systemPrompt.section({
 		name: "github.worktrees",
 		order: 150,
-		text: () => (wtConfig(scope).enabled ? WORKTREE_GUIDANCE : "")
+		text: () => {
+			const wt = wtConfig(scope);
+			if (!wt.enabled) return "";
+			return wt.requireForEdits ? WORKTREE_GUIDANCE_REQUIRED : WORKTREE_GUIDANCE_OPTIONAL;
+		}
 	}));
+}
+
+/**
+ * Decide whether one pending tool call must be denied because it edits the main
+ * checkout instead of a worktree. Returns a denial reason, or `undefined` to let
+ * the call through.
+ *
+ * Deliberately narrow: only the deterministic file-mutation tools (`write`,
+ * `edit`) are gated, only inside the calling session's own repository, and never
+ * for a session that is already isolated (its own cwd is a linked worktree) or
+ * one with no git repository to branch from. `bash` is left alone — a shell
+ * command cannot be classified reliably — so the prompt covers it.
+ */
+async function worktreeEditDenial(scope, exec) {
+	const wt = wtConfig(scope);
+	if (!wt.enabled || !wt.requireForEdits) return undefined;
+	if (exec?.name !== "write" && exec?.name !== "edit") return undefined;
+	const args = exec.arguments;
+	const filePath = args !== null && typeof args === "object" ? args.file_path : undefined;
+	if (typeof filePath !== "string" || filePath === "") return undefined;
+	const header = exec.agent?.session?.header;
+	const cwd = header?.cwd;
+	const sessionId = header?.id;
+	if (typeof cwd !== "string" || cwd === "" || typeof sessionId !== "string" || sessionId === "") return undefined;
+	// No repository to branch from, or the session is already its own worktree.
+	if (!(await isGitRepo(cwd))) return undefined;
+	if (await isLinkedWorktree(cwd)) return undefined;
+	const target = isAbsolute(filePath) ? filePath : join(cwd, filePath);
+	const container = join(cwd, wt.dir, sessionId);
+	if (!editNeedsWorktree({ target, repoPath: cwd, container })) return undefined;
+	return `Worktrees are required in this repository: '${filePath}' is in the main checkout (${cwd}). ` +
+		`Call github_create_worktree first (name it after the issue), then make this change inside the returned worktree path. ` +
+		`Set worktreeRequireForEdits=false in the GitHub plugin settings to make this advisory instead of enforced.`;
+}
+
+/** Install the pre-execute gate that enforces the worktree requirement. */
+function registerWorktreeEditGuard(ctx, scope) {
+	if (typeof ctx.on !== "function") return;
+	ctx.on("tools/pre-execute", async (exec, next) => {
+		const reason = await worktreeEditDenial(scope, exec)
+			.catch((error) => {
+				ctx.logger?.warn(`github: worktree edit gate failed open: ${String(error?.message ?? error)}`);
+				return undefined;
+			});
+		if (reason !== undefined) return { kind: "deny", reason };
+		return next();
+	});
 }
 
 /**
@@ -703,6 +775,7 @@ function apply(ctx, config) {
 	registerHandlers(ctx, scope);
 	registerTools(ctx, scope);
 	registerWorktreeGuidance(ctx, scope);
+	registerWorktreeEditGuard(ctx, scope);
 	wrapArchiveSession(ctx, scope);
 	startupPrune(ctx, scope).catch((error) => ctx.logger?.warn(`github: startup worktree prune failed: ${String(error?.message ?? error)}`));
 	// Provide the directoryPicker service (a browse capability backed by our fs

@@ -19,6 +19,7 @@ import {
 	isLinkedWorktree,
 	isSessionDirName,
 	isWorktreeUnder,
+	editNeedsWorktree,
 	isWithin,
 	resolveDefaultBranch,
 	createWorktree,
@@ -80,6 +81,23 @@ test("session directory naming is the ownership signal", () => {
 	assert.equal(isSessionDirName("my-checkout"), false);
 	assert.equal(isSessionDirName("session-"), false);
 	assert.equal(isSessionDirName("session-abc/../evil"), false);
+});
+
+test("editNeedsWorktree gates the main checkout, not worktrees or the wider fs", () => {
+	const repoPath = "/r";
+	const container = "/r/.dsh-worktrees/session-1";
+	// In the main checkout -> a worktree is required.
+	assert.equal(editNeedsWorktree({ target: "/r/src/a.ts", repoPath, container }), true);
+	assert.equal(editNeedsWorktree({ target: "/r/deep/nested/b.ts", repoPath, container }), true);
+	// Inside THIS session's worktree -> allowed.
+	assert.equal(editNeedsWorktree({ target: "/r/.dsh-worktrees/session-1/src/a.ts", repoPath, container }), false);
+	// Inside ANOTHER session's worktree -> still the shared checkout, so required.
+	assert.equal(editNeedsWorktree({ target: "/r/.dsh-worktrees/session-2/src/a.ts", repoPath, container }), true);
+	// Outside the repository entirely -> never our business.
+	assert.equal(editNeedsWorktree({ target: "/tmp/scratch.txt", repoPath, container }), false);
+	assert.equal(editNeedsWorktree({ target: "/etc/hosts", repoPath, container }), false);
+	// A sibling path that merely shares a prefix is not inside the repo.
+	assert.equal(editNeedsWorktree({ target: "/r-other/a.ts", repoPath, container }), false);
 });
 
 test("git repo detection", async (t) => {
