@@ -6,8 +6,9 @@ A Gemini-style mobile skin for the DeepSeek Harness web UI. It is **client-only*
 On mobile-width viewports it:
 
 - Hides the left workspace/session menu entirely (the shipped sidebar and the
-  session header are collapsed away) so the conversation + prompt bar fill the
-  screen.
+  details panel are collapsed away) and hides the shipped conversation session
+  header (the breadcrumb/title row, the Chat/Details tabs, and the session-log
+  action) so the conversation + prompt bar fill the screen.
 - Adds a floating **top bar**: a hamburger (top-left), the **current session name**
   (center, falling back to the workspace title), and a **New Session** button
   (top-right). The top-right button creates a new session in the current workspace.
